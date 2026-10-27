@@ -234,8 +234,7 @@ function route() {
   const hash = location.hash.replace(/^#/, '') || '/';
   const [path, query = ''] = hash.split('?');
   const parts = path.split('/').filter(Boolean);
-  document.body.classList.remove('sidebar-open');
-  hideSuggestions();
+  closeMobileSearch();
 
   if (parts[0] === 'watch' && /^[\w-]{11}$/.test(parts[1] || '')) return renderWatch(parts[1], token);
   if (parts[0] === 'channel' && parts[1]) return renderChannel(parts[1], token);
@@ -259,6 +258,20 @@ function hideSuggestions() {
   suggestions.hidden = true;
   activeSuggestion = -1;
 }
+
+// 휴대폰: 돋보기를 누르면 상단 바가 검색창으로 바뀐다.
+function openMobileSearch() {
+  document.body.classList.add('search-open');
+  searchInput.focus();
+}
+
+function closeMobileSearch() {
+  document.body.classList.remove('search-open');
+  hideSuggestions();
+}
+
+document.getElementById('searchOpenBtn').addEventListener('click', openMobileSearch);
+document.getElementById('searchBack').addEventListener('click', closeMobileSearch);
 
 function doSearch(q) {
   q = q.trim();
@@ -297,7 +310,7 @@ searchInput.addEventListener('input', () => {
 });
 
 searchInput.addEventListener('keydown', (e) => {
-  if (suggestions.hidden) return;
+  if (suggestions.hidden || e.key === 'Escape') return;
   const items = [...suggestions.children];
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
@@ -305,9 +318,11 @@ searchInput.addEventListener('keydown', (e) => {
     const n = items.length + 1;
     activeSuggestion = ((activeSuggestion + 1 + (e.key === 'ArrowDown' ? 1 : -1) + n) % n) - 1;
     items.forEach((li, i) => li.classList.toggle('active', i === activeSuggestion));
-  } else if (e.key === 'Escape') {
-    hideSuggestions();
   }
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeMobileSearch();
 });
 
 searchInput.addEventListener('blur', () => setTimeout(hideSuggestions, 100));
@@ -315,8 +330,7 @@ searchInput.addEventListener('blur', () => setTimeout(hideSuggestions, 100));
 // ---------- 메뉴 / 테마 ----------
 
 document.getElementById('menuBtn').addEventListener('click', () => {
-  if (window.matchMedia('(max-width: 800px)').matches) document.body.classList.toggle('sidebar-open');
-  else document.body.classList.toggle('sidebar-collapsed');
+  document.body.classList.toggle('sidebar-collapsed');
 });
 
 function applyTheme(theme) {
