@@ -1,4 +1,4 @@
-# MinTube
+# School YouTube
 
 로그인 없이 접속하자마자 바로 영상을 볼 수 있는 YouTube 뷰어입니다. Cloudflare Workers 무료 플랜에서 돌아갑니다.
 

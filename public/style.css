@@ -169,7 +169,7 @@ body.sidebar-collapsed .content { padding-left: 24px; }
   .sidebar { display: none; }
   body.sidebar-open .sidebar { display: block; box-shadow: 4px 0 24px rgba(0, 0, 0, .2); }
   .content, body.sidebar-collapsed .content { padding-left: 16px; padding-right: 16px; }
-  .logo-text { display: none; }
+  .logo-text { font-size: 13px; line-height: 1.15; width: min-content; }
   .search-btn { width: 48px; }
   .grid { grid-template-columns: 1fr; gap: 24px; }
   .search-results .card { flex-direction: column; }

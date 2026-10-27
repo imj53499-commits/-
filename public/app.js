@@ -57,7 +57,7 @@ function skeletonGrid(count = 12) {
 }
 
 function setTitle(text) {
-  document.title = text ? `${text} - MinTube` : 'MinTube';
+  document.title = text ? `${text} - School YouTube` : 'School YouTube';
 }
 
 function setActiveNav(key) {
