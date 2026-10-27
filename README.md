@@ -16,7 +16,7 @@ API 키도 로그인도 필요 없습니다. Worker가 YouTube 내부 API에 익
 2. 왼쪽 메뉴 **Compute (Workers)** → **Workers & Pages** → **Create application**
 3. **Import a repository** 선택 → GitHub 연결 → 이 저장소 선택
 4. 브랜치를 이 코드가 있는 브랜치로 고르고, 나머지 설정은 그대로 두고 **Deploy**
-5. 끝나면 `https://mintube.<내-서브도메인>.workers.dev` 주소가 생깁니다
+5. 끝나면 `https://worker.<내-서브도메인>.workers.dev` 주소가 생깁니다
 
 이후 이 브랜치에 push 할 때마다 자동으로 다시 배포됩니다.
 
