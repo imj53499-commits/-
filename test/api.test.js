@@ -1,0 +1,189 @@
+import { test, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { handleApi, clearCache } from '../src/api.js';
+import { createYouTube, extractVideos } from '../src/youtube.js';
+
+// ---------- YouTube 응답과 같은 모양의 가짜 데이터 ----------
+
+const videoRenderer = (id, title) => ({
+  videoRenderer: {
+    videoId: id,
+    title: { runs: [{ text: title }] },
+    ownerText: { runs: [{ text: '테스트 채널', navigationEndpoint: { browseEndpoint: { browseId: 'UCaaaaaaaaaaaaaaaaaaaaaa' } } }] },
+    channelThumbnailSupportedRenderers: { channelThumbnailWithLinkRenderer: { thumbnail: { thumbnails: [{ url: '//yt3.ggpht.com/a.jpg' }] } } },
+    shortViewCountText: { simpleText: '조회수 1.2만회' },
+    publishedTimeText: { simpleText: '3일 전' },
+    lengthText: { simpleText: '10:01' }
+  }
+});
+
+const lockup = (id, title, contentType = 'LOCKUP_CONTENT_TYPE_VIDEO') => ({
+  lockupViewModel: {
+    contentId: id,
+    contentType,
+    contentImage: {
+      thumbnailViewModel: {
+        overlays: [{ thumbnailOverlayBadgeViewModel: { thumbnailBadges: [{ thumbnailBadgeViewModel: { text: '3:21' } }] } }]
+      }
+    },
+    metadata: {
+      lockupMetadataViewModel: {
+        title: { content: title },
+        image: { decoratedAvatarViewModel: { avatar: { avatarViewModel: { image: { sources: [{ url: 'https://yt3.ggpht.com/b.jpg' }] } } } } },
+        metadata: {
+          contentMetadataViewModel: {
+            metadataRows: [
+              { metadataParts: [{ text: { content: '락업 채널', commandRuns: [{ onTap: { innertubeCommand: { browseEndpoint: { browseId: 'UCbbbbbbbbbbbbbbbbbbbbbb' } } } }] } }] },
+              { metadataParts: [{ text: { content: '조회수 5천회' } }, { text: { content: '1주 전' } }] }
+            ]
+          }
+        }
+      }
+    }
+  }
+});
+
+const responses = {
+  search: (body) => ({
+    contents: {
+      twoColumnSearchResultsRenderer: {
+        primaryContents: {
+          sectionListRenderer: {
+            contents: [{
+              itemSectionRenderer: {
+                contents: [
+                  videoRenderer(`s${String(body.query.length).padStart(10, '0')}`, `${body.query} 영상`),
+                  { channelRenderer: { channelId: 'UCcccccccccccccccccccccc' } },
+                  { reelShelfRenderer: { items: [{ reelItemRenderer: { videoId: 'short000001', headline: { simpleText: '쇼츠' } } }] } }
+                ]
+              }
+            }]
+          }
+        }
+      }
+    }
+  }),
+  browse: (body) => body.browseId === 'FEwhat_to_watch'
+    ? { contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { content: { richGridRenderer: { contents: [] } } } }] } } }
+    : {
+        metadata: { channelMetadataRenderer: { title: '테스트 채널', description: '채널 설명', avatar: { thumbnails: [{ url: 'https://yt3.ggpht.com/a.jpg' }] } } },
+        header: { pageHeaderRenderer: { content: { pageHeaderViewModel: { banner: { imageBannerViewModel: { image: { sources: [{ url: 'https://yt3.ggpht.com/s.jpg' }, { url: 'https://yt3.ggpht.com/l.jpg' }] } } } } } } },
+        contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { content: { richGridRenderer: { contents: [{ richItemRenderer: { content: videoRenderer('chv00000001', '채널 영상') } }] } } } }] } }
+      },
+  next: (body) => ({
+    contents: {
+      twoColumnWatchNextResults: {
+        results: {
+          results: {
+            contents: [
+              { videoPrimaryInfoRenderer: { title: { runs: [{ text: '영상 제목 <script>' }] }, viewCount: { videoViewCountRenderer: { viewCount: { simpleText: '조회수 1,234회' } } }, relativeDateText: { simpleText: '1일 전' } } },
+              { videoSecondaryInfoRenderer: {
+                owner: { videoOwnerRenderer: { title: { runs: [{ text: '테스트 채널', navigationEndpoint: { browseEndpoint: { browseId: 'UCaaaaaaaaaaaaaaaaaaaaaa' } } }] }, thumbnail: { thumbnails: [{ url: 'https://yt3.ggpht.com/a.jpg' }] }, subscriberCountText: { simpleText: '구독자 10만명' } } },
+                attributedDescription: { content: '설명 https://example.com' }
+              } }
+            ]
+          }
+        },
+        secondaryResults: { secondaryResults: { results: [lockup('rel00000001', '관련 영상'), lockup('PLxxxxxxxxx', '재생목록', 'LOCKUP_CONTENT_TYPE_PLAYLIST'), lockup(body.videoId, '자기 자신')] } }
+      }
+    }
+  })
+};
+
+let calls = [];
+let failing = false;
+
+async function fakeFetch(url, init) {
+  calls.push(url);
+  if (failing) return new Response('blocked', { status: 403 });
+  if (url.includes('suggestqueries')) {
+    const q = new URL(url).searchParams.get('q');
+    return Response.json([q, [`${q} 추천`, `${q} 노래`]]);
+  }
+  const endpoint = new URL(url).pathname.split('/').pop();
+  const body = JSON.parse(init.body);
+  assert.equal(body.context.client.clientName, 'WEB');
+  return Response.json(responses[endpoint](body));
+}
+
+const yt = createYouTube(fakeFetch);
+const get = async (path) => {
+  const res = await handleApi(new URL(`https://mintube.test${path}`), yt);
+  return { status: res.status, type: res.headers.get('content-type'), body: await res.json() };
+};
+
+beforeEach(() => {
+  calls = [];
+  failing = false;
+  clearCache();
+});
+
+test('홈 피드가 비어 있으면 검색 결과로 채운다', async () => {
+  const res = await get('/api/home');
+  assert.equal(res.status, 200);
+  assert.match(res.type, /application\/json; charset=utf-8/);
+  assert.ok(res.body.length >= 1);
+  assert.ok(calls.some((c) => c.includes('/browse')));
+  assert.ok(calls.some((c) => c.includes('/search')));
+  assert.equal(res.body[0].channel, '테스트 채널');
+  assert.equal(res.body[0].channelAvatar, 'https://yt3.ggpht.com/a.jpg');
+  assert.ok(res.body.every((v) => !v.isShort));
+});
+
+test('알 수 없는 카테고리는 전체로 처리', async () => {
+  const res = await get('/api/home?category=zzz');
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('/browse')));
+});
+
+test('검색: 영상만 남기고 채널/쇼츠는 뺀다', async () => {
+  const s = await get('/api/search?q=' + encodeURIComponent('고양이'));
+  assert.equal(s.body.length, 1);
+  assert.equal(s.body[0].title, '고양이 영상');
+  assert.equal(s.body[0].duration, '10:01');
+  assert.equal(s.body[0].meta, '조회수 1.2만회 · 3일 전');
+  assert.deepEqual((await get('/api/search')).body, []);
+});
+
+test('자동완성', async () => {
+  assert.deepEqual((await get('/api/suggest?q=abc')).body, ['abc 추천', 'abc 노래']);
+});
+
+test('영상 정보와 관련 영상 (재생목록, 자기 자신 제외)', async () => {
+  const res = await get('/api/video?id=dQw4w9WgXcQ');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.title, '영상 제목 <script>');
+  assert.equal(res.body.subscribers, '구독자 10만명');
+  assert.equal(res.body.channelId, 'UCaaaaaaaaaaaaaaaaaaaaaa');
+  assert.equal(res.body.description, '설명 https://example.com');
+  assert.deepEqual(res.body.related.map((v) => v.id), ['rel00000001']);
+  assert.equal(res.body.related[0].channelId, 'UCbbbbbbbbbbbbbbbbbbbbbb');
+  assert.equal(res.body.related[0].duration, '3:21');
+  assert.equal((await get('/api/video?id=bad')).status, 400);
+});
+
+test('채널 페이지', async () => {
+  const res = await get('/api/channel?id=UCaaaaaaaaaaaaaaaaaaaaaa');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.name, '테스트 채널');
+  assert.equal(res.body.banner, 'https://yt3.ggpht.com/l.jpg');
+  assert.equal(res.body.videos[0].channelId, 'UCaaaaaaaaaaaaaaaaaaaaaa');
+  assert.equal((await get('/api/channel?id=nope')).status, 400);
+});
+
+test('YouTube 가 막으면 502 와 안내 메시지', async () => {
+  failing = true;
+  const res = await get('/api/search?q=x');
+  assert.equal(res.status, 502);
+  assert.ok(res.body.error);
+  assert.equal((await get('/api/home')).status, 502);
+});
+
+test('없는 API 경로는 404', async () => {
+  assert.equal((await get('/api/nope')).status, 404);
+});
+
+test('extractVideos 는 중복을 빼고 순서를 지킨다', () => {
+  const items = extractVideos([videoRenderer('aaaaaaaaaaa', '1'), { x: [videoRenderer('bbbbbbbbbbb', '2')] }, videoRenderer('aaaaaaaaaaa', '1')]);
+  assert.deepEqual(items.map((v) => v.id), ['aaaaaaaaaaa', 'bbbbbbbbbbb']);
+});

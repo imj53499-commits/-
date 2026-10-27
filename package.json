@@ -1,19 +1,15 @@
 {
   "name": "mintube",
   "version": "1.0.0",
-  "description": "로그인 없이 바로 볼 수 있는 YouTube 뷰어",
+  "description": "로그인 없이 바로 볼 수 있는 YouTube 뷰어 (Cloudflare Workers)",
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "test": "node --test"
   },
-  "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "express": "^4.22.3",
-    "youtubei.js": "^18.3.0"
+  "devDependencies": {
+    "wrangler": "^4.153.0"
   }
 }

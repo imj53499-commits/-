@@ -1,6 +1,6 @@
 # MinTube
 
-로그인 없이 접속하자마자 바로 영상을 볼 수 있는 YouTube 뷰어입니다.
+로그인 없이 접속하자마자 바로 영상을 볼 수 있는 YouTube 뷰어입니다. Cloudflare Workers 무료 플랜에서 돌아갑니다.
 
 - 홈: 들어가면 바로 인기/추천 영상 목록 (카테고리: 음악, 게임, 뉴스, 스포츠 …)
 - 검색 + 자동완성
@@ -8,22 +8,31 @@
 - 채널 페이지
 - 다크 모드, 모바일 화면 지원
 
-YouTube 데이터는 [youtubei.js](https://github.com/LuanRT/YouTube.js)로 익명 요청해서 가져오기 때문에 API 키나 로그인이 필요 없습니다.
+API 키도 로그인도 필요 없습니다. Worker가 YouTube 내부 API에 익명으로 요청해서 영상 정보를 가져옵니다.
 
-## 실행
+## Cloudflare에 올리기 (터미널 없이)
 
-Node.js 20 이상이 필요합니다.
+1. https://dash.cloudflare.com 에 가입/로그인
+2. 왼쪽 메뉴 **Compute (Workers)** → **Workers & Pages** → **Create application**
+3. **Import a repository** 선택 → GitHub 연결 → 이 저장소 선택
+4. 브랜치를 이 코드가 있는 브랜치로 고르고, 나머지 설정은 그대로 두고 **Deploy**
+5. 끝나면 `https://mintube.<내-서브도메인>.workers.dev` 주소가 생깁니다
+
+이후 이 브랜치에 push 할 때마다 자동으로 다시 배포됩니다.
+
+## 터미널로 올리기
 
 ```bash
 npm install
-npm start          # http://localhost:3000
+npx wrangler login
+npm run deploy
 ```
 
-포트를 바꾸려면 `PORT=8080 npm start`.
-
-## 테스트
+## 내 컴퓨터에서 실행
 
 ```bash
+npm install
+npm run dev        # http://localhost:8787
 npm test
 ```
 
@@ -31,12 +40,13 @@ npm test
 
 | 파일 | 역할 |
 |------|------|
-| `server.js` | 서버 시작, 익명 YouTube 클라이언트 생성 |
-| `src/app.js` | API 라우트 (`/api/home`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
-| `src/normalize.js` | YouTube 응답을 화면용 데이터로 변환 |
+| `src/worker.js` | Worker 진입점: `/api/*` 는 API, 나머지는 `public/` 화면 파일 |
+| `src/api.js` | API 라우트 (`/api/home`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
+| `src/youtube.js` | YouTube 내부 API 호출과 응답에서 영상 정보 추출 |
 | `public/` | 화면 (HTML/CSS/JS, 빌드 불필요) |
+| `wrangler.jsonc` | Cloudflare Workers 설정 |
 
 ## 참고
 
-- Render, Railway, Fly.io 같은 Node 서버 호스팅에 그대로 올릴 수 있습니다.
-- 클라우드 서버 IP는 YouTube가 가끔 막을 수 있습니다. 그럴 땐 화면에 "다시 시도" 안내가 나옵니다.
+- YouTube가 응답 형식을 바꾸면 일부 정보가 안 나올 수 있습니다. 그땐 `src/youtube.js` 의 추출 부분만 고치면 됩니다.
+- YouTube가 Cloudflare 서버 IP를 가끔 막을 수 있습니다. 그럴 땐 화면에 "다시 시도" 안내가 나옵니다.
