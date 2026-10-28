@@ -12,6 +12,12 @@ export const CATEGORIES = {
   animal: ['귀여운 동물']
 };
 
+// 쇼츠 피드용 검색어. page 마다 다음 검색어 묶음을 써서 계속 새 쇼츠를 불러온다.
+export const SHORTS_QUERIES = [
+  ['#shorts', '쇼츠 인기'], ['웃긴 쇼츠', '#shorts 동물'], ['#shorts 게임', '#shorts 음악'],
+  ['#shorts 먹방', '#shorts 스포츠'], ['#shorts 댄스', '#shorts 꿀팁']
+];
+
 const CACHE_TTL = 5 * 60 * 1000;
 const cache = new Map();
 
@@ -79,6 +85,16 @@ export async function handleApi(url, yt) {
       case '/api/home': {
         const category = CATEGORIES[q('category', 20)] ? q('category', 20) : 'all';
         return json(await cached(`home:${category}`, () => home(yt, category)));
+      }
+      case '/api/shorts': {
+        const page = Math.max(0, Math.min(Number.parseInt(q('page', 3), 10) || 0, 99));
+        const queries = SHORTS_QUERIES[page % SHORTS_QUERIES.length];
+        return json(await cached(`shorts:${page}`, async () => {
+          const settled = await Promise.allSettled(queries.map((query) => yt.shorts(query)));
+          const lists = settled.filter((s) => s.status === 'fulfilled').map((s) => s.value);
+          if (!lists.length) throw settled[0].reason;
+          return interleave(lists, 30);
+        }));
       }
       case '/api/search': {
         const query = q('q', 200);

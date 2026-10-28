@@ -66,7 +66,8 @@ function fromVideoRenderer(v) {
     meta: meta.join(' · '),
     duration: text(v.lengthText),
     thumbnail: thumb(v.videoId),
-    isShort: false
+    // 검색 결과에 섞여 나오는 쇼츠는 링크가 쇼츠 플레이어(reelWatchEndpoint)로 걸려 있다.
+    isShort: !!v.navigationEndpoint?.reelWatchEndpoint
   };
 }
 
@@ -183,6 +184,12 @@ export function createYouTube(fetchFn = fetch) {
     async search(query) {
       const data = await call('search', { query, params: SEARCH_VIDEOS_ONLY });
       return extractVideos(data.contents, 40).filter((v) => !v.isShort);
+    },
+
+    // 쇼츠만 골라 온다. 검색 결과의 쇼츠 묶음(reelShelf)과 쇼츠 링크가 걸린 영상을 모은다.
+    async shorts(query) {
+      const data = await call('search', { query });
+      return extractVideos(data.contents, 80).filter((v) => v.isShort);
     },
 
     async homeFeed() {

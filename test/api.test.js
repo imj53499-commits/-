@@ -54,7 +54,11 @@ const responses = {
                 contents: [
                   videoRenderer(`s${String(body.query.length).padStart(10, '0')}`, `${body.query} 영상`),
                   { channelRenderer: { channelId: 'UCcccccccccccccccccccccc' } },
-                  { reelShelfRenderer: { items: [{ reelItemRenderer: { videoId: 'short000001', headline: { simpleText: '쇼츠' } } }] } }
+                  { reelShelfRenderer: { items: [
+                    { reelItemRenderer: { videoId: 'short000001', headline: { simpleText: '쇼츠' } } },
+                    { shortsLockupViewModel: { onTap: { innertubeCommand: { reelWatchEndpoint: { videoId: 'short000002' } } }, overlayMetadata: { primaryText: { content: '쇼츠 둘' }, secondaryText: { content: '조회수 3만회' } } } }
+                  ] } },
+                  { videoRenderer: { ...videoRenderer('short000003', '쇼츠 셋').videoRenderer, navigationEndpoint: { reelWatchEndpoint: { videoId: 'short000003' } } } }
                 ]
               }
             }]
@@ -143,6 +147,22 @@ test('검색: 영상만 남기고 채널/쇼츠는 뺀다', async () => {
   assert.equal(s.body[0].duration, '10:01');
   assert.equal(s.body[0].meta, '조회수 1.2만회 · 3일 전');
   assert.deepEqual((await get('/api/search')).body, []);
+});
+
+test('쇼츠: 쇼츠만 모아서 주고, 일반 검색에서는 빠진다', async () => {
+  const res = await get('/api/shorts');
+  assert.equal(res.status, 200);
+  const ids = res.body.map((v) => v.id);
+  assert.ok(ids.includes('short000001') && ids.includes('short000002') && ids.includes('short000003'));
+  assert.ok(res.body.every((v) => v.isShort));
+  assert.equal(res.body.find((v) => v.id === 'short000002').title, '쇼츠 둘');
+  assert.equal(new Set(ids).size, ids.length);
+  // page 가 바뀌면 다른 검색어를 쓴다
+  calls = [];
+  await get('/api/shorts?page=1');
+  assert.ok(calls.length > 0);
+  const s = await get('/api/search?q=' + encodeURIComponent('고양이'));
+  assert.ok(s.body.every((v) => !v.id.startsWith('short')));
 });
 
 test('자동완성', async () => {

@@ -3,6 +3,7 @@
 관리자가 승인한 사람만 들어와서 볼 수 있는 YouTube 뷰어입니다. Cloudflare Pages 무료 플랜에서 돌아갑니다.
 
 - 홈: 들어가면 바로 인기/추천 영상 목록 (카테고리: 음악, 게임, 뉴스, 스포츠 …)
+- Shorts: 세로로 한 개씩 넘겨 보기 (휴대폰은 위아래로 밀기, 컴퓨터는 휠이나 ↑↓ 키), 끝까지 가면 자동으로 더 불러옴
 - 검색 + 자동완성
 - 영상 재생 (YouTube 공식 임베드 플레이어), 설명, 관련 영상
 - 채널 페이지
@@ -59,7 +60,7 @@ npm test
 | `functions/api/[[path]].js` | Pages 진입점 (`/api/*`) |
 | `src/server.js` | `/api/*` 입구: 로그인 확인 후 영상 API 로 전달 |
 | `src/auth.js` | 가입, 로그인, 세션, 관리자 승인 (KV 저장) |
-| `src/api.js` | API 라우트 (`/api/home`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
+| `src/api.js` | API 라우트 (`/api/home`, `/api/shorts`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
 | `src/youtube.js` | YouTube 내부 API 호출과 응답에서 영상 정보 추출 |
 | `public/` | 화면 (HTML/CSS/JS, 빌드 불필요) |
 | `wrangler.jsonc` | Cloudflare Pages 설정 (출력 폴더 `public`) |

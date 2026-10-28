@@ -180,7 +180,8 @@ async function renderWatch(id, token) {
       onload: (e) => listenToPlayer(e.target),
       allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
       allowfullscreen: '',
-      referrerpolicy: 'strict-origin-when-cross-origin'
+      referrerpolicy: 'strict-origin-when-cross-origin',
+      'data-player': ''
     }));
   const info = el('div', {}, el('div', { class: 'skeleton' },
     el('div', { class: 'line', style: 'width:70%;height:22px;margin-top:14px' }),
@@ -243,6 +244,95 @@ async function renderChannel(id, token) {
   }
 }
 
+// ---------- 쇼츠: 세로로 한 개씩 넘겨 보기 ----------
+// 화면에 보이는 쇼츠 하나에만 플레이어를 넣고, 나머지는 썸네일로 둔다 (가볍게).
+
+function shortPlayer(id) {
+  return el('iframe', {
+    src: `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1&loop=1&playlist=${id}&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`,
+    title: '쇼츠 플레이어',
+    allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
+    allowfullscreen: '',
+    referrerpolicy: 'strict-origin-when-cross-origin',
+    'data-player': '',
+    onload: (e) => listenToPlayer(e.target)
+  });
+}
+
+function shortSlide(v) {
+  const frame = el('div', { class: 'short-frame' },
+    el('img', { src: safeImg(v.thumbnail), alt: '', loading: 'lazy' }),
+    el('div', { class: 'short-info' },
+      el('div', { class: 'short-title', text: v.title }),
+      v.meta ? el('div', { class: 'short-meta', text: v.meta }) : null));
+  const slide = el('section', { class: 'short' }, frame);
+  slide.dataset.id = v.id;
+  return slide;
+}
+
+async function renderShorts(token) {
+  setTitle();
+  setActiveNav('shorts');
+  const feed = el('div', { class: 'shorts', tabindex: '-1' });
+  app.replaceChildren(feed);
+  document.body.classList.add('shorts-mode');
+
+  const seen = new Set();
+  let page = 0;
+  let loading = false;
+  let active = null;
+
+  function activate(slide) {
+    if (active === slide) return;
+    if (active) active.querySelector('iframe')?.remove();
+    active = slide;
+    playerState = -1;
+    slide.querySelector('.short-frame').append(shortPlayer(slide.dataset.id));
+    // 끝에서 세 번째쯤 오면 다음 쇼츠를 미리 불러온다
+    const slides = feed.querySelectorAll('.short');
+    if ([...slides].indexOf(slide) >= slides.length - 3) loadMore();
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) if (entry.isIntersecting) activate(entry.target);
+  }, { root: feed, threshold: 0.6 });
+
+  async function loadMore() {
+    if (loading) return;
+    loading = true;
+    try {
+      const items = await api(`/api/shorts?page=${page++}`);
+      if (token !== renderToken) return;
+      feed.querySelector('.shorts-loading')?.remove();
+      for (const v of items) {
+        if (seen.has(v.id)) continue;
+        seen.add(v.id);
+        const slide = shortSlide(v);
+        feed.append(slide);
+        observer.observe(slide);
+      }
+      if (!feed.querySelector('.short')) feed.replaceChildren(errorView('쇼츠를 찾지 못했어요.', () => route()));
+    } catch (err) {
+      if (token !== renderToken) return;
+      if (!feed.querySelector('.short')) feed.replaceChildren(errorView(err.message, () => route()));
+    } finally {
+      loading = false;
+    }
+  }
+
+  // 컴퓨터에서는 ↑ ↓ 키로도 넘긴다
+  function onKey(e) {
+    if (token !== renderToken) return window.removeEventListener('keydown', onKey);
+    if (isTypingTarget(e.target) || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+    e.preventDefault();
+    feed.scrollBy({ top: (e.key === 'ArrowDown' ? 1 : -1) * feed.clientHeight, behavior: 'smooth' });
+  }
+  window.addEventListener('keydown', onKey);
+
+  feed.append(el('div', { class: 'message shorts-loading', text: '쇼츠 불러오는 중…' }));
+  loadMore();
+}
+
 // ---------- 라우터 ----------
 
 function route() {
@@ -252,11 +342,13 @@ function route() {
   const parts = path.split('/').filter(Boolean);
   closeMobileSearch();
   updateAccountUI();
+  document.body.classList.remove('shorts-mode');
 
   if (parts[0] === 'admin') return renderAdmin(token);
   document.body.classList.toggle('auth-mode', !me);
   if (!me) return renderAuth(token);
 
+  if (parts[0] === 'shorts') return renderShorts(token);
   if (parts[0] === 'watch' && /^[\w-]{11}$/.test(parts[1] || '')) return renderWatch(parts[1], token);
   if (parts[0] === 'channel' && parts[1]) return renderChannel(parts[1], token);
   if (parts[0] === 'search') {
@@ -569,7 +661,7 @@ function listenToPlayer(iframe) {
 }
 
 function playerCommand(func) {
-  const iframe = document.querySelector('.player iframe');
+  const iframe = document.querySelector('iframe[data-player]');
   iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*');
 }
 
