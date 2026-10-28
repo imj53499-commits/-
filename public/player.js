@@ -99,3 +99,20 @@ export function pickNext(related, currentId) {
   const candidates = (related || []).filter((v) => v.id !== currentId && !v.isShort);
   return candidates.find((v) => !watched.has(v.id)) || candidates[0] || null;
 }
+
+// ---------- 팝업 창 크기와 위치 (마지막으로 쓴 값을 기억) ----------
+
+const POPUP_BOUNDS_KEY = 'popupBounds';
+
+export function loadPopupBounds() {
+  try {
+    const b = JSON.parse(localStorage.getItem(POPUP_BOUNDS_KEY) || 'null');
+    return b && [b.width, b.height, b.left, b.top].every(Number.isFinite) ? b : null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePopupBounds(bounds) {
+  try { localStorage.setItem(POPUP_BOUNDS_KEY, JSON.stringify(bounds)); } catch {}
+}

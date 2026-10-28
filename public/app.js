@@ -5,7 +5,7 @@ import {
 } from './shortcuts.js';
 import {
   embedUrl, sendToPlayer, listenTo, readPlayerMessage, autostart, loadAutoplay, saveAutoplay,
-  loadHistory, recordWatch, clearHistory, pickNext, ENDED, PAUSED
+  loadHistory, recordWatch, clearHistory, pickNext, loadPopupBounds, ENDED, PAUSED
 } from './player.js';
 
 const app = document.getElementById('app');
@@ -751,10 +751,14 @@ window.addEventListener('message', (e) => {
 let popupWin = null;
 
 function openPopup(id, start = Math.floor(playerTime || 0)) {
-  const width = Math.min(854, screen.availWidth - 40);
-  const height = Math.round(width * 9 / 16);
+  // 지난번 팝업 크기와 위치를 그대로 쓰고, 처음이면 오른쪽 아래에 적당한 크기로 연다.
+  const saved = loadPopupBounds();
+  const width = Math.min(saved?.width ?? 854, screen.availWidth - 20);
+  const height = Math.min(saved?.height ?? Math.round(width * 9 / 16), screen.availHeight - 20);
+  const left = saved?.left ?? screen.availWidth - width - 20;
+  const top = saved?.top ?? screen.availHeight - height - 60;
   const win = window.open(`/popup.html?v=${encodeURIComponent(id)}&t=${start}`, 'sy_popup',
-    `popup,width=${width},height=${height},left=${screen.availWidth - width - 20},top=${screen.availHeight - height - 60}`);
+    `popup,width=${width},height=${height},left=${left},top=${top}`);
   if (!win) {
     alert('팝업이 차단됐어요. 주소창 오른쪽의 팝업 차단 아이콘을 눌러 이 사이트의 팝업을 허용해 주세요.');
     return;
