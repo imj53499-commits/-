@@ -11,15 +11,25 @@
 
 API 키도 로그인도 필요 없습니다. Worker가 YouTube 내부 API에 익명으로 요청해서 영상 정보를 가져옵니다.
 
-## Cloudflare에 올리기 (터미널 없이)
+## Cloudflare Pages에 올리기 (추천: 내 도메인을 별칭으로 연결 가능)
 
-1. https://dash.cloudflare.com 에 가입/로그인
-2. 왼쪽 메뉴 **Compute (Workers)** → **Workers & Pages** → **Create application**
-3. **Import a repository** 선택 → GitHub 연결 → 이 저장소 선택
-4. 브랜치를 이 코드가 있는 브랜치로 고르고, 나머지 설정은 그대로 두고 **Deploy**
-5. 끝나면 `https://worker.<내-서브도메인>.workers.dev` 주소가 생깁니다
+1. https://dash.cloudflare.com → **Workers & Pages** → **Create application** → **Pages** 탭 → **Import an existing Git repository**
+2. 이 저장소와 브랜치 선택
+3. 빌드 설정
+   - Framework preset: **None**
+   - Build command: **비워 두기**
+   - Build output directory: **`public`**
+4. **Save and Deploy** → `https://<프로젝트이름>.pages.dev` 주소가 생깁니다
+5. 내 도메인 연결: 프로젝트 → **Custom domains** → **Set up a custom domain** → 도메인 입력
+   → 내도메인.한국 등에서 **별칭(CNAME)** 을 `<프로젝트이름>.pages.dev` 로 설정
 
-이후 이 브랜치에 push 할 때마다 자동으로 다시 배포됩니다.
+`/api/*` 는 `functions/api/[[path]].js` (Pages Functions)가 처리합니다.
+
+## Cloudflare Workers에 올리기
+
+1. **Workers & Pages** → **Create application** → **Import a repository** → 이 저장소 선택
+2. 나머지 설정은 그대로 두고 **Deploy** → `https://worker.<내-서브도메인>.workers.dev`
+   (Workers는 Cloudflare에 등록된 도메인만 연결할 수 있습니다)
 
 ## 터미널로 올리기
 
@@ -41,7 +51,8 @@ npm test
 
 | 파일 | 역할 |
 |------|------|
-| `src/worker.js` | Worker 진입점: `/api/*` 는 API, 나머지는 `public/` 화면 파일 |
+| `functions/api/[[path]].js` | Pages 진입점 (`/api/*`) |
+| `src/worker.js` | Workers 진입점: `/api/*` 는 API, 나머지는 `public/` 화면 파일 |
 | `src/api.js` | API 라우트 (`/api/home`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
 | `src/youtube.js` | YouTube 내부 API 호출과 응답에서 영상 정보 추출 |
 | `public/` | 화면 (HTML/CSS/JS, 빌드 불필요) |
