@@ -421,7 +421,7 @@ async function renderAdmin(token) {
 const accountSection = document.getElementById('accountSection');
 
 function updateAccountUI() {
-  accountSection.hidden = !me;
+  accountSection.hidden = !me || me.role === 'guest';
   if (!me) return;
   document.getElementById('accountName').textContent = me.username;
   document.getElementById('adminLink').hidden = me.role !== 'admin';
@@ -441,13 +441,9 @@ async function loadMe() {
   try {
     me = await api('/api/auth/me');
   } catch (err) {
-    me = null;
-    if (err.code === 'NO_DB') {
-      app.replaceChildren(errorView('사이트 설정이 아직 끝나지 않았어요. 관리자에게 알려 주세요. (KV 저장소 연결 필요)'));
-      return false;
-    }
+    // 로그인 기능을 아직 설정하지 않은 사이트는 로그인 없이 그대로 쓴다.
+    me = err.code === 'NO_DB' ? { username: '', role: 'guest' } : null;
   }
-  return true;
 }
 
 // ---------- 검색 + 자동완성 ----------
@@ -692,4 +688,4 @@ window.addEventListener('blur', () => {
   }, 0);
 });
 
-loadMe().then((ok) => { if (ok) route(); });
+loadMe().then(route);

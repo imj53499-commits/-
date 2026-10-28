@@ -142,8 +142,9 @@ test('로그아웃하면 세션이 지워진다', async () => {
   assert.equal((await call('/api/auth/me', { cookie: u.cookie })).status, 401);
 });
 
-test('설정이 빠져 있으면 알려 준다', async () => {
+test('KV 를 연결하기 전에는 로그인 없이 열려 있고, 로그인 API 는 설정 필요를 알려 준다', async () => {
   env = { ADMIN_PASSWORD: 'x' };
+  assert.equal((await call('/api/search?q=x')).status, 200);
   assert.equal((await call('/api/auth/me')).body.code, 'NO_DB');
   env = { DB: fakeKV() };
   assert.equal((await adminLogin()).body.code, 'NO_ADMIN_PASSWORD');
