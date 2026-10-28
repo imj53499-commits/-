@@ -154,24 +154,82 @@ async function renderHome(category, token) {
   app.replaceChildren(chips, body);
 
   // 전체 탭에서는 최근 본 영상의 관련 영상(추천)과 인기 영상을 섞어서 보여 준다.
+  // 방문할 때마다 seed 를 새로 뽑아서 사람마다, 들어올 때마다 다른 영상이 나오고,
+  // 아래 끝에 닿으면 다음 페이지(다른 검색어, 더 예전에 본 영상의 추천)를 이어 붙인다.
   const history = category === 'all' ? loadHistory() : [];
-  const seeds = history.slice(0, 2).map((h) => h.id).join(',');
-  const [homeRes, recRes] = await Promise.allSettled([
-    api(`/api/home?category=${encodeURIComponent(category)}`),
-    seeds ? api(`/api/recommend?ids=${seeds}`) : Promise.resolve([])
-  ]);
-  if (token !== renderToken) return;
-  if (homeRes.status === 'rejected' && !(recRes.value?.length)) {
-    body.replaceChildren(errorView(homeRes.reason.message, () => route()));
-    return;
+  const seen = new Set(history.map((h) => h.id));
+  const seed = 1 + Math.floor(Math.random() * 2 ** 30);
+  const grid = el('div', { class: 'grid' });
+  const status = el('div', { class: 'feed-status' });
+  let page = 0;
+  let loading = false;
+  let done = false;
+  let emptyPages = 0;
+
+  const observer = new IntersectionObserver((entries) => {
+    if (token !== renderToken) return observer.disconnect();
+    if (entries.some((e) => e.isIntersecting)) loadPage();
+  }, { rootMargin: '1200px 0px' });
+
+  async function loadPage() {
+    if (loading || done || token !== renderToken) return;
+    loading = true;
+    const p = page;
+    status.replaceChildren(el('div', { class: 'feed-loading', text: '불러오는 중…' }));
+    const recSeeds = history.slice(p * 2, p * 2 + 2).map((h) => h.id).join(',');
+    const [homeRes, recRes] = await Promise.allSettled([
+      api(`/api/home?category=${encodeURIComponent(category)}&page=${p}&seed=${seed}`),
+      recSeeds ? api(`/api/recommend?ids=${recSeeds}`) : Promise.resolve([])
+    ]);
+    if (token !== renderToken) return;
+    loading = false;
+
+    if (homeRes.status === 'rejected' && !(recRes.value?.length)) {
+      if (p === 0) {
+        observer.disconnect();
+        body.replaceChildren(errorView(homeRes.reason.message, () => route()));
+      } else {
+        status.replaceChildren(errorView(homeRes.reason.message, () => loadPage()));
+      }
+      return;
+    }
+    page++;
+    const fresh = (list) => (list || []).filter((v) => !seen.has(v.id));
+    const recs = fresh(recRes.value);
+    const items = mixFeed(recs, shuffle(fresh(homeRes.value)));
+    for (const v of items) seen.add(v.id);
+
+    if (p === 0) {
+      body.replaceChildren(recs.length ? el('p', { class: 'feed-note', text: '최근 본 영상을 바탕으로 골랐어요' }) : '', grid, status);
+      observer.observe(status);
+    }
+    grid.append(...items.map(videoCard));
+    status.replaceChildren();
+
+    emptyPages = items.length ? 0 : emptyPages + 1;
+    if (emptyPages >= 3 || page > MAX_HOME_PAGE) {
+      done = true;
+      observer.disconnect();
+      status.replaceChildren(el('p', { class: 'feed-end', text: grid.children.length ? '더 볼 영상이 없어요' : '표시할 영상이 없어요.' }));
+      return;
+    }
+    // 화면이 아직 안 찼으면(새 영상이 적었으면) 바로 다음 페이지
+    const rect = status.getBoundingClientRect();
+    if (rect.top < innerHeight + 1200) loadPage();
   }
-  const watched = new Set(history.map((h) => h.id));
-  const fresh = (list) => (list || []).filter((v) => !watched.has(v.id));
-  const recs = fresh(recRes.value);
-  const items = mixFeed(recs, fresh(homeRes.value));
-  body.replaceChildren(
-    recs.length ? el('p', { class: 'feed-note', text: '최근 본 영상을 바탕으로 골랐어요' }) : '',
-    items.length ? videoGrid(items) : errorView('표시할 영상이 없어요.'));
+
+  loadPage();
+}
+
+const MAX_HOME_PAGE = 60;
+
+function shuffle(list) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 // 추천 2개, 인기 1개 순서로 섞는다. 같은 영상은 한 번만.

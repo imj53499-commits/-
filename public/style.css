@@ -118,6 +118,9 @@ body.sidebar-collapsed .content { padding-left: 24px; }
   .card:hover .card-popup { display: grid; }
 }
 .feed-note { margin: 4px 0 0; color: var(--text-sub); font-size: 13px; }
+.feed-status { min-height: 1px; }
+.feed-loading, .feed-end { padding: 32px 0; text-align: center; color: var(--text-sub); }
+.feed-end { margin: 0; }
 .card-body { display: flex; gap: 12px; }
 .avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--skeleton); }
 .avatar[hidden] { display: none !important; }

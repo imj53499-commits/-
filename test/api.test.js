@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleApi, clearCache } from '../src/api.js';
+import { handleApi, clearCache, homeQueries, CATEGORIES } from '../src/api.js';
 import { createYouTube, extractVideos } from '../src/youtube.js';
 
 // ---------- YouTube 응답과 같은 모양의 가짜 데이터 ----------
@@ -215,4 +215,23 @@ test('추천: 최근 본 영상들의 관련 영상을 섞고, 본 영상은 뺀
   assert.equal(calls.filter((c) => c.includes('/next')).length, 2); // 최대 2개 영상만 본다
   assert.deepEqual((await get('/api/recommend?ids=')).body, []);
   assert.deepEqual((await get('/api/recommend?ids=bad')).body, []);
+});
+
+test('홈: 방문(seed)마다 검색어 순서가 다르고, 페이지마다 새 검색어를 쓴다', () => {
+  const a = homeQueries('all', 0, 1);
+  const b = homeQueries('all', 0, 987654);
+  assert.notDeepEqual(a, b);
+  assert.deepEqual(homeQueries('all', 0, 1), a); // 같은 seed 는 같은 결과
+  const seen = new Set();
+  for (let page = 0; page < 40; page++) for (const q of homeQueries('music', page, 42)) seen.add(q);
+  assert.equal(seen.size, 80); // 검색어를 다 써도 말을 붙여서 계속 새 검색어
+  for (const q of homeQueries('news', 0, 5)) assert.ok(CATEGORIES.news.some((base) => q.startsWith(base)));
+});
+
+test('홈: 페이지를 넘기면 다른 검색을 한다', async () => {
+  await get('/api/home?category=music&page=0&seed=7');
+  const first = calls.filter((c) => c.includes('/search')).length;
+  await get('/api/home?category=music&page=1&seed=7');
+  assert.equal(calls.filter((c) => c.includes('/search')).length, first + 2);
+  assert.equal((await get('/api/home?category=music&page=999&seed=7')).status, 200);
 });

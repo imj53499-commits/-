@@ -1,16 +1,49 @@
 import { VIDEO_ID, CHANNEL_ID } from './youtube.js';
 
-// 로그인하지 않은 상태의 홈 피드는 비어 있는 경우가 많아서, 카테고리별 검색어로 채운다.
+// 로그인하지 않은 상태의 홈 피드는 비어 있고 모두에게 똑같아서, 카테고리별 검색어 묶음으로 채운다.
+// 방문할 때마다 다른 순서(seed)로 검색어를 고르고, 아래로 내릴 때마다(page) 다음 검색어를 쓴다.
 export const CATEGORIES = {
-  all: ['인기 급상승', '오늘의 추천 영상', '최신 뮤직비디오'],
-  music: ['최신 뮤직비디오', '인기 음악'],
-  game: ['게임 하이라이트', '인기 게임 영상'],
-  news: ['오늘의 뉴스'],
-  sports: ['스포츠 하이라이트'],
-  food: ['먹방', '요리 레시피'],
-  vlog: ['브이로그'],
-  animal: ['귀여운 동물']
+  all: [
+    '인기 급상승', '오늘의 추천 영상', '최신 뮤직비디오', '웃긴 영상', '게임 하이라이트', '먹방', '브이로그',
+    '스포츠 하이라이트', '귀여운 동물', '요리 레시피', '여행 브이로그', '예능 하이라이트', '드라마 명장면',
+    '영화 리뷰', '과학 다큐', '역사 이야기', '자동차 리뷰', '테크 리뷰', '아이돌 무대', '커버곡',
+    '공부 자극', '운동 루틴', '캠핑', '낚시', 'ASMR', '마술', '실험 영상', '애니메이션', '웹툰', '축구 골 모음'
+  ],
+  music: ['최신 뮤직비디오', '인기 음악', '아이돌 무대', '커버곡', '플레이리스트', '라이브 콘서트', '힙합', '발라드', '밴드 라이브', 'OST'],
+  game: ['게임 하이라이트', '인기 게임 영상', '마인크래프트', '롤 하이라이트', '배그', '게임 공략', '신작 게임', '스팀 게임', '닌텐도', '게임 리뷰'],
+  news: ['오늘의 뉴스', '경제 뉴스', '과학 뉴스', 'IT 뉴스', '세계 뉴스', '스포츠 뉴스', '날씨', '뉴스 브리핑'],
+  sports: ['스포츠 하이라이트', '축구 골 모음', '야구 하이라이트', '농구 하이라이트', '배구 하이라이트', 'UFC', 'F1', '테니스', '올림픽', 'e스포츠'],
+  food: ['먹방', '요리 레시피', '맛집 탐방', '디저트 만들기', '길거리 음식', '자취 요리', '베이킹', '편의점 신상', '캠핑 요리', '대식가'],
+  vlog: ['브이로그', '여행 브이로그', '일상 브이로그', '학생 브이로그', '직장인 브이로그', '해외 브이로그', '자취 브이로그', '캠핑 브이로그'],
+  animal: ['귀여운 동물', '강아지', '고양이', '웃긴 동물', '동물 다큐', '아기 동물', '햄스터', '앵무새', '수족관', '야생 동물']
 };
+
+// 검색어를 다 쓰면 이런 말을 붙여서 새 검색어를 만든다 (아래로 계속 내릴 수 있게).
+const QUERY_VARIANTS = ['', ' 최신', ' 인기', ' 모음', ' 레전드', ' 추천', ' 하이라이트', ' 몰아보기'];
+const QUERIES_PER_PAGE = 2;
+export const MAX_HOME_PAGE = 60;
+
+// seed 로 항상 같은 결과가 나오는 섞기 (같은 방문 안에서는 페이지마다 이어지게)
+function seededShuffle(list, seed) {
+  const out = [...list];
+  let x = (seed >>> 0) || 1;
+  for (let i = out.length - 1; i > 0; i--) {
+    x ^= x << 13; x ^= x >>> 17; x ^= x << 5; x >>>= 0;
+    const j = x % (i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+export function homeQueries(category, page, seed) {
+  const pool = seededShuffle(CATEGORIES[category], seed);
+  const queries = [];
+  for (let i = 0; i < QUERIES_PER_PAGE; i++) {
+    const n = page * QUERIES_PER_PAGE + i;
+    queries.push(pool[n % pool.length] + QUERY_VARIANTS[Math.floor(n / pool.length) % QUERY_VARIANTS.length]);
+  }
+  return queries;
+}
 
 // 쇼츠 피드용 검색어. page 마다 다음 검색어 묶음을 써서 계속 새 쇼츠를 불러온다.
 export const SHORTS_QUERIES = [
@@ -63,22 +96,18 @@ function interleave(lists, limit) {
   return out.slice(0, limit);
 }
 
-async function home(yt, category) {
-  let items = [];
-  if (category === 'all') {
-    try {
-      items = await yt.homeFeed();
-    } catch (err) {
-      console.warn('[home] 홈 피드 실패, 검색으로 대체:', err?.message || err);
-    }
+async function home(yt, category, page, seed) {
+  // 검색어별로 캐시해서, 사람마다 순서는 달라도 YouTube 요청은 서로 나눠 쓴다.
+  const tasks = homeQueries(category, page, seed).map((query) => cached(`search:${query}`, () => yt.search(query)));
+  // 전체 탭 첫 페이지에는 YouTube 홈 피드도 시도해서 섞는다 (비어 있으면 무시).
+  if (category === 'all' && page === 0) tasks.unshift(cached('homefeed', () => yt.homeFeed()));
+  const settled = await Promise.allSettled(tasks);
+  const lists = settled.filter((s) => s.status === 'fulfilled').map((s) => s.value);
+  if (!lists.some((l) => l.length)) {
+    const failure = settled.find((s) => s.status === 'rejected');
+    if (failure) throw failure.reason;
   }
-  if (items.length < 12) {
-    const settled = await Promise.allSettled(CATEGORIES[category].map((q) => yt.search(q)));
-    const lists = settled.filter((s) => s.status === 'fulfilled').map((s) => s.value);
-    if (!lists.length && !items.length) throw settled[0].reason;
-    items = interleave([items, ...lists], 40);
-  }
-  return items;
+  return interleave(lists, 40);
 }
 
 export async function handleApi(url, yt) {
@@ -87,7 +116,9 @@ export async function handleApi(url, yt) {
     switch (url.pathname) {
       case '/api/home': {
         const category = CATEGORIES[q('category', 20)] ? q('category', 20) : 'all';
-        return json(await cached(`home:${category}`, () => home(yt, category)));
+        const page = Math.max(0, Math.min(Number.parseInt(q('page', 3), 10) || 0, MAX_HOME_PAGE));
+        const seed = Number.parseInt(q('seed', 10), 10) || 1;
+        return json(await home(yt, category, page, seed));
       }
       case '/api/shorts': {
         const page = Math.max(0, Math.min(Number.parseInt(q('page', 3), 10) || 0, 99));
