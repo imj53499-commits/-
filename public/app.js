@@ -10,6 +10,7 @@ const CATEGORY_LABELS = {
 };
 
 let renderToken = 0;
+let me = null; // 로그인한 계정 { username, role } 또는 null
 
 // ---------- 유틸 ----------
 
@@ -25,10 +26,21 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
-async function api(path) {
-  const res = await fetch(path);
+async function api(path, { method = 'GET', body } = {}) {
+  const res = await fetch(path, body === undefined
+    ? { method }
+    : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `요청 실패 (${res.status})`);
+  if (!res.ok) {
+    // 로그인이 풀렸으면(승인 취소, 만료 등) 로그인 화면으로 돌아간다.
+    if (data.code === 'LOGIN_REQUIRED' && me) {
+      me = null;
+      setTimeout(route, 0);
+    }
+    const err = new Error(data.error || `요청 실패 (${res.status})`);
+    err.code = data.code;
+    throw err;
+  }
   return data;
 }
 
@@ -235,6 +247,11 @@ function route() {
   const [path, query = ''] = hash.split('?');
   const parts = path.split('/').filter(Boolean);
   closeMobileSearch();
+  updateAccountUI();
+
+  if (parts[0] === 'admin') return renderAdmin(token);
+  document.body.classList.toggle('auth-mode', !me);
+  if (!me) return renderAuth(token);
 
   if (parts[0] === 'watch' && /^[\w-]{11}$/.test(parts[1] || '')) return renderWatch(parts[1], token);
   if (parts[0] === 'channel' && parts[1]) return renderChannel(parts[1], token);
@@ -248,6 +265,190 @@ function route() {
 }
 
 window.addEventListener('hashchange', route);
+
+// ---------- 로그인 / 가입 ----------
+
+function authCard(...children) {
+  return el('div', { class: 'auth' }, el('div', { class: 'auth-card' }, ...children));
+}
+
+function field(label, input) {
+  return el('label', { class: 'field' }, el('span', { text: label }), input);
+}
+
+function renderAuth(token, mode = 'login', notice = '') {
+  setTitle(mode === 'login' ? '로그인' : '가입하기');
+  setActiveNav('');
+  const username = el('input', { name: 'username', autocomplete: 'username', required: '', maxlength: '20' });
+  const password = el('input', {
+    name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
+    autocomplete: mode === 'login' ? 'current-password' : 'new-password'
+  });
+  const message = el('p', { class: `auth-message${notice ? ' ok' : ''}`, text: notice, role: 'alert' });
+  const submit = el('button', { class: 'auth-submit', type: 'submit', text: mode === 'login' ? '로그인' : '가입 신청' });
+  const tab = (key, label) => el('button', {
+    type: 'button', class: `auth-tab${mode === key ? ' active' : ''}`, text: label,
+    onclick: () => renderAuth(token, key)
+  });
+
+  const form = el('form', { class: 'auth-form' },
+    field('아이디', username),
+    field('비밀번호', password),
+    mode === 'signup' ? el('p', { class: 'auth-hint', text: '아이디는 한글·영문·숫자 2~20자, 비밀번호는 6자 이상이에요. 가입하면 관리자가 승인한 뒤에 쓸 수 있어요.' }) : null,
+    message,
+    submit);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submit.disabled = true;
+    message.className = 'auth-message';
+    message.textContent = '';
+    try {
+      const body = { username: username.value.trim(), password: password.value };
+      if (mode === 'signup') {
+        await api('/api/auth/signup', { method: 'POST', body });
+        renderAuth(token, 'login', '가입 신청이 완료됐어요! 관리자가 승인하면 로그인할 수 있어요.');
+        return;
+      }
+      me = await api('/api/auth/login', { method: 'POST', body });
+      route();
+    } catch (err) {
+      message.textContent = err.message;
+      submit.disabled = false;
+    }
+  });
+
+  app.replaceChildren(authCard(
+    el('h1', { class: 'auth-title', text: 'School YouTube' }),
+    el('div', { class: 'auth-tabs' }, tab('login', '로그인'), tab('signup', '가입하기')),
+    form));
+  username.focus();
+}
+
+// ---------- 관리자: 가입 승인 ----------
+
+const STATUS_LABELS = { pending: '승인 대기', approved: '승인됨', rejected: '거절됨' };
+
+async function renderAdmin(token) {
+  setTitle('가입 승인 관리');
+  setActiveNav('');
+  document.body.classList.toggle('auth-mode', !me);
+
+  if (me?.role !== 'admin') {
+    const password = el('input', { type: 'password', autocomplete: 'current-password', required: '' });
+    const message = el('p', { class: 'auth-message', role: 'alert' });
+    const submit = el('button', { class: 'auth-submit', type: 'submit', text: '관리자 로그인' });
+    const form = el('form', { class: 'auth-form' }, field('관리자 비밀번호', password), message, submit);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      submit.disabled = true;
+      try {
+        me = await api('/api/admin/login', { method: 'POST', body: { password: password.value } });
+        route();
+      } catch (err) {
+        message.textContent = err.message;
+        submit.disabled = false;
+      }
+    });
+    app.replaceChildren(authCard(el('h1', { class: 'auth-title', text: '관리자' }), form));
+    password.focus();
+    return;
+  }
+
+  const body = el('div', { class: 'admin-body' }, el('p', { class: 'message', text: '불러오는 중…' }));
+  app.replaceChildren(el('div', { class: 'admin' },
+    el('div', { class: 'admin-head' },
+      el('h1', { text: '가입 승인 관리' }),
+      el('button', { class: 'admin-refresh', text: '새로고침', onclick: () => route() })),
+    body));
+
+  let users;
+  try {
+    users = await api('/api/admin/users');
+  } catch (err) {
+    if (token !== renderToken) return;
+    if (err.code === 'ADMIN_REQUIRED') { me = null; return route(); }
+    body.replaceChildren(errorView(err.message, () => route()));
+    return;
+  }
+  if (token !== renderToken) return;
+
+  // 저장소 목록은 바로 반영되지 않을 수 있어서, 버튼을 누르면 화면에서 직접 바꾼다.
+  async function act(user, action, row) {
+    row.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    try {
+      await api('/api/admin/users', { method: 'POST', body: { username: user.username, action } });
+      if (action === 'delete') users = users.filter((u) => u !== user);
+      else user.status = { approve: 'approved', reject: 'rejected' }[action];
+      draw();
+    } catch (err) {
+      alert(err.message);
+      row.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    }
+  }
+
+  function userRow(user) {
+    const row = el('li', { class: 'admin-row' });
+    const date = user.createdAt ? new Date(user.createdAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+    const btn = (text, action, cls = '') => el('button', { class: cls, text, onclick: () => act(user, action, row) });
+    const actions = {
+      pending: [btn('승인', 'approve', 'approve'), btn('거절', 'reject')],
+      approved: [btn('승인 취소', 'reject'), btn('삭제', 'delete', 'danger')],
+      rejected: [btn('승인', 'approve', 'approve'), btn('삭제', 'delete', 'danger')]
+    }[user.status] || [];
+    row.append(
+      el('div', { class: 'admin-user' }, el('strong', { text: user.username }), el('span', { text: date })),
+      el('div', { class: 'admin-actions' }, ...actions));
+    return row;
+  }
+
+  function draw() {
+    const sections = ['pending', 'approved', 'rejected'].map((status) => {
+      const list = users.filter((u) => u.status === status);
+      return el('section', { class: 'admin-section' },
+        el('h2', { text: `${STATUS_LABELS[status]} ${list.length}` }),
+        list.length
+          ? el('ul', { class: 'admin-list' }, ...list.map(userRow))
+          : el('p', { class: 'admin-empty', text: status === 'pending' ? '기다리는 사람이 없어요.' : '없음' }));
+    });
+    body.replaceChildren(...sections);
+  }
+  draw();
+}
+
+// ---------- 계정 (설정 창) ----------
+
+const accountSection = document.getElementById('accountSection');
+
+function updateAccountUI() {
+  accountSection.hidden = !me;
+  if (!me) return;
+  document.getElementById('accountName').textContent = me.username;
+  document.getElementById('adminLink').hidden = me.role !== 'admin';
+}
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  try { await api('/api/auth/logout', { method: 'POST', body: {} }); } catch {}
+  me = null;
+  settingsDialog.close();
+  location.hash = '#/';
+  route();
+});
+
+document.getElementById('adminLink').addEventListener('click', () => settingsDialog.close());
+
+async function loadMe() {
+  try {
+    me = await api('/api/auth/me');
+  } catch (err) {
+    me = null;
+    if (err.code === 'NO_DB') {
+      app.replaceChildren(errorView('사이트 설정이 아직 끝나지 않았어요. 관리자에게 알려 주세요. (KV 저장소 연결 필요)'));
+      return false;
+    }
+  }
+  return true;
+}
 
 // ---------- 검색 + 자동완성 ----------
 
@@ -491,4 +692,4 @@ window.addEventListener('blur', () => {
   }, 0);
 });
 
-route();
+loadMe().then((ok) => { if (ok) route(); });

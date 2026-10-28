@@ -186,6 +186,56 @@ body.sidebar-collapsed .content { padding-left: 24px; }
 .settings-actions { display: flex; gap: 8px; margin-top: 8px; }
 .settings .close { margin-top: 16px; background: none; border: 1px solid var(--border); }
 
+.account-section { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.account-section h2 { margin-bottom: 12px; }
+.settings-link[hidden] { display: none; }
+.settings-link {
+  display: flex; align-items: center; justify-content: center; height: 40px; margin-bottom: 8px;
+  border-radius: 20px; background: var(--accent); color: #fff; font-weight: 600;
+}
+
+/* 로그인 / 가입 화면 */
+body.auth-mode .sidebar, body.auth-mode .search, body.auth-mode .search-open-btn { display: none !important; }
+body.auth-mode .content { padding-left: 16px; padding-right: 16px; }
+.auth { display: flex; justify-content: center; padding: 48px 0; }
+.auth-card { width: min(380px, 100%); padding: 28px 24px; border: 1px solid var(--border); border-radius: 16px; }
+.auth-title { margin: 0 0 20px; font-size: 22px; text-align: center; }
+.auth-tabs { display: flex; gap: 4px; padding: 4px; margin-bottom: 20px; border-radius: 12px; background: var(--bg-soft); }
+.auth-tab { flex: 1; height: 36px; border-radius: 9px; font-weight: 600; color: var(--text-sub); }
+.auth-tab.active { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.auth-form { display: flex; flex-direction: column; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: 13px; }
+.field input {
+  height: 44px; padding: 0 14px; font-size: 16px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 10px; outline: none;
+}
+.field input:focus { border-color: var(--accent); }
+.auth-hint { margin: 0; font-size: 12px; color: var(--text-sub); line-height: 1.5; }
+.auth-message { margin: 0; min-height: 1em; font-size: 13px; color: #e5484d; line-height: 1.5; }
+.auth-message:empty { display: none; }
+.auth-message.ok { color: var(--accent); font-weight: 600; }
+.auth-submit { height: 44px; border-radius: 22px; background: var(--accent); color: #fff; font-weight: 700; font-size: 15px; }
+.auth-submit:disabled { opacity: .6; cursor: default; }
+
+/* 관리자 화면 */
+.admin { max-width: 720px; margin: 0 auto; padding: 16px 0 40px; }
+.admin-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-head h1 { margin: 0; font-size: 22px; }
+.admin-refresh { padding: 8px 16px; border-radius: 18px; background: var(--bg-soft); font-weight: 600; }
+.admin-section h2 { margin: 28px 0 10px; font-size: 16px; }
+.admin-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.admin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; }
+.admin-row + .admin-row { border-top: 1px solid var(--border); }
+.admin-user { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.admin-user strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+.admin-user span { font-size: 12px; color: var(--text-sub); }
+.admin-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.admin-actions button { padding: 7px 14px; border-radius: 16px; background: var(--bg-soft); font-weight: 600; font-size: 13px; }
+.admin-actions button.approve { background: var(--accent); color: #fff; }
+.admin-actions button.danger { color: #e5484d; }
+.admin-actions button:disabled { opacity: .5; }
+.admin-empty { margin: 0; color: var(--text-sub); }
+
 .search-back, .search-open-btn { display: none; }
 
 /* ---------- 휴대폰 ---------- */
@@ -193,7 +243,10 @@ body.sidebar-collapsed .content { padding-left: 24px; }
   :root { --topbar-h: 48px; --bottom-h: 56px; }
 
   .topbar { padding: 0 4px 0 12px; gap: 4px; }
-  #menuBtn, .settings-btn { display: none; }
+  #menuBtn, .shortcut-section, body.auth-mode .settings-btn { display: none; }
+  .account-section { padding-bottom: 0; margin-bottom: 0; border-bottom: 0; }
+  .admin { padding: 16px 12px 40px; }
+  body.auth-mode .content { padding-left: 16px; padding-right: 16px; }
   .logo-text { font-size: 17px; }
 
   /* 검색: 돋보기를 누르면 상단 바 전체가 검색창이 된다 */

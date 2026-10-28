@@ -38,7 +38,7 @@
       <button class="icon-btn" id="themeBtn" aria-label="테마 전환">
         <svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>
       </button>
-      <button class="icon-btn settings-btn" id="settingsBtn" aria-label="단축키 설정" title="빠른 나가기 단축키 설정">
+      <button class="icon-btn settings-btn" id="settingsBtn" aria-label="설정" title="설정">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </button>
       <button class="icon-btn" id="exitBtn" aria-label="빠른 나가기" title="빠른 나가기">
@@ -68,6 +68,16 @@
   <main id="app" class="content"></main>
 
   <dialog id="settingsDialog" class="settings">
+    <div id="accountSection" class="account-section" hidden>
+      <h2>계정</h2>
+      <div class="shortcut-row">
+        <span>로그인한 계정</span>
+        <strong id="accountName"></strong>
+      </div>
+      <a id="adminLink" class="settings-link" href="#/admin" hidden>가입 승인 관리</a>
+      <button type="button" id="logoutBtn">로그아웃</button>
+    </div>
+    <div class="shortcut-section">
     <h2>빠른 나가기 단축키</h2>
     <p>이 키를 누르면 화면이 바로 사라지고 Google로 이동해요.</p>
     <div class="shortcut-row">
@@ -80,6 +90,7 @@
       <button type="button" id="shortcutOff">단축키 끄기</button>
     </div>
     <p class="hint">Ctrl + 키처럼 조합해서 정해도 돼요. Ctrl+W, Ctrl+T처럼 브라우저가 쓰는 단축키는 정할 수 없어요.</p>
+    </div>
     <button type="button" class="close" id="settingsClose">닫기</button>
   </dialog>
 

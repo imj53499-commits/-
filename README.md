@@ -1,15 +1,16 @@
 # School YouTube
 
-로그인 없이 접속하자마자 바로 영상을 볼 수 있는 YouTube 뷰어입니다. Cloudflare Pages 무료 플랜에서 돌아갑니다.
+관리자가 승인한 사람만 들어와서 볼 수 있는 YouTube 뷰어입니다. Cloudflare Pages 무료 플랜에서 돌아갑니다.
 
 - 홈: 들어가면 바로 인기/추천 영상 목록 (카테고리: 음악, 게임, 뉴스, 스포츠 …)
 - 검색 + 자동완성
 - 영상 재생 (YouTube 공식 임베드 플레이어), 설명, 관련 영상
 - 채널 페이지
 - 다크 모드, 모바일 화면 지원
+- 로그인: 가입하면 **관리자가 승인해야** 쓸 수 있음. 관리자 화면은 `/#/admin`
 - 빠른 나가기: 단축키(기본 `` ` ``, 오른쪽 위 ⚙에서 원하는 키나 Ctrl+키 조합으로 변경) 또는 나가기 버튼 → 화면을 바로 지우고 Google로 이동 (주소는 `public/app.js` 의 `EXIT_URL`)
 
-API 키도 로그인도 필요 없습니다. 서버(Pages Functions)가 YouTube 내부 API에 익명으로 요청해서 영상 정보를 가져옵니다.
+YouTube API 키는 필요 없습니다. 서버(Pages Functions)가 YouTube 내부 API에 익명으로 요청해서 영상 정보를 가져옵니다.
 
 ## Cloudflare Pages에 올리기
 
@@ -23,6 +24,16 @@ API 키도 로그인도 필요 없습니다. 서버(Pages Functions)가 YouTube 
 
 `/api/*` 는 `functions/api/[[path]].js` (Pages Functions)가 처리합니다.
 
+## 로그인 설정 (처음 한 번)
+
+1. **KV 저장소 만들기**: Cloudflare → **Storage & databases** → **KV** → **Create** (이름 예: `schoolyoutube-db`)
+   → 만들어진 KV 의 **ID** 를 `wrangler.jsonc` 의 `kv_namespaces` 에 넣기 (binding 이름은 `DB`)
+2. **관리자 비밀번호 정하기**: Pages 프로젝트 → **Settings** → **Variables and Secrets** → **Add**
+   → Type **Secret**, Name `ADMIN_PASSWORD`, Value 원하는 비밀번호 → 저장 후 다시 배포
+3. `https://<내 주소>/#/admin` 에서 관리자 비밀번호로 들어가 가입 신청을 승인/거절
+
+계정은 KV 에 저장되고, 비밀번호는 PBKDF2 로 해시해서 저장합니다. 로그인 유지 기간은 30일(관리자는 12시간)입니다.
+
 ## 터미널로 올리기
 
 ```bash
@@ -35,7 +46,7 @@ npm run deploy        # wrangler pages deploy
 
 ```bash
 npm install
-npm run dev        # http://localhost:8788
+npm run dev -- --kv DB --binding ADMIN_PASSWORD=test   # http://localhost:8788
 npm test
 ```
 
@@ -44,6 +55,8 @@ npm test
 | 파일 | 역할 |
 |------|------|
 | `functions/api/[[path]].js` | Pages 진입점 (`/api/*`) |
+| `src/server.js` | `/api/*` 입구: 로그인 확인 후 영상 API 로 전달 |
+| `src/auth.js` | 가입, 로그인, 세션, 관리자 승인 (KV 저장) |
 | `src/api.js` | API 라우트 (`/api/home`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
 | `src/youtube.js` | YouTube 내부 API 호출과 응답에서 영상 정보 추출 |
 | `public/` | 화면 (HTML/CSS/JS, 빌드 불필요) |

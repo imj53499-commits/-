@@ -33,7 +33,7 @@ function json(data, status = 200) {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': status === 200 ? 'public, max-age=300' : 'no-store'
+      'Cache-Control': status === 200 ? 'private, max-age=300' : 'no-store'
     }
   });
 }
