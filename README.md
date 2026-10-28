@@ -9,7 +9,7 @@
 - 다크 모드, 모바일 화면 지원
 - 빠른 나가기: `` ` `` 키(숫자 1 왼쪽) 또는 오른쪽 위 나가기 버튼 → 화면을 바로 지우고 Google로 이동 (주소는 `public/app.js` 의 `EXIT_URL`)
 
-API 키도 로그인도 필요 없습니다. Worker가 YouTube 내부 API에 익명으로 요청해서 영상 정보를 가져옵니다.
+API 키도 로그인도 필요 없습니다. 서버(Pages Functions)가 YouTube 내부 API에 익명으로 요청해서 영상 정보를 가져옵니다.
 
 ## Cloudflare Pages에 올리기
 
