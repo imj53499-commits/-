@@ -2,7 +2,7 @@
 // 계정과 세션은 Cloudflare KV(env.DB)에 저장하고, 관리자 비밀번호는 env.ADMIN_PASSWORD(비밀 값)로 받는다.
 //
 // KV 키
-//   user:<아이디(소문자)>   → { username, salt, hash, status, createdAt }   (metadata 에 username, status, createdAt)
+//   user:<아이디(소문자)>   → { username, name, salt, hash, status, createdAt }   (metadata 에 username, name, status, createdAt)
 //   session:<토큰>          → { role: 'user' | 'admin', username? }          (만료 시간 있음)
 
 export const SESSION_COOKIE = 'sy_session';
@@ -12,6 +12,8 @@ const ADMIN_SESSION_TTL = 60 * 60 * 12; // 12시간
 const PBKDF2_ITERATIONS = 10000;
 
 const USERNAME = /^[a-zA-Z0-9_가-힣]{2,20}$/;
+// 본인 이름: 글자(한글, 영문 등), 공백, . - ' 만 1~20자
+const REAL_NAME = /^[\p{L}\p{M}][\p{L}\p{M} .'-]{0,19}$/u;
 const STATUSES = ['pending', 'approved', 'rejected'];
 
 // ---------- 공통 ----------
@@ -100,7 +102,7 @@ export async function getSession(request, env) {
   // 승인이 취소되거나 계정이 지워지면 바로 못 쓰게, 매번 계정 상태를 확인한다.
   const user = await env.DB.get(userKey(session.username), 'json');
   if (!user || user.status !== 'approved') return null;
-  return { role: 'user', username: user.username, token };
+  return { role: 'user', username: user.username, name: user.name || '', token };
 }
 
 // ---------- 라우트 ----------
@@ -109,14 +111,16 @@ async function signup(request, env) {
   const body = await readJson(request);
   const username = String(body?.username ?? '').trim();
   const password = String(body?.password ?? '');
+  const name = String(body?.name ?? '').trim().replace(/\s+/g, ' ');
+  if (!REAL_NAME.test(name)) return fail('이름을 1~20자로 적어 주세요. (글자와 띄어쓰기만)', 400);
   if (!USERNAME.test(username)) return fail('아이디는 한글, 영문, 숫자, _ 로 2~20자로 정해 주세요.', 400);
   if (password.length < 6 || password.length > 100) return fail('비밀번호는 6자 이상으로 정해 주세요.', 400);
   if (await env.DB.get(userKey(username))) return fail('이미 있는 아이디예요.', 409);
 
   const salt = randomHex(16);
   const createdAt = Date.now();
-  const user = { username, salt, hash: await hashPassword(password, salt), status: 'pending', createdAt };
-  await env.DB.put(userKey(username), JSON.stringify(user), { metadata: { username, status: 'pending', createdAt } });
+  const user = { username, name, salt, hash: await hashPassword(password, salt), status: 'pending', createdAt };
+  await env.DB.put(userKey(username), JSON.stringify(user), { metadata: { username, name, status: 'pending', createdAt } });
   return json({ ok: true, status: 'pending' }, 201);
 }
 
@@ -132,7 +136,7 @@ async function login(request, env) {
   if (user.status !== 'approved') return fail('가입이 승인되지 않았어요.', 403, 'REJECTED');
 
   const token = await createSession(env, { role: 'user', username: user.username }, USER_SESSION_TTL);
-  return json({ username: user.username, role: 'user' }, 200, { 'Set-Cookie': sessionCookie(token, USER_SESSION_TTL) });
+  return json({ username: user.username, name: user.name || '', role: 'user' }, 200, { 'Set-Cookie': sessionCookie(token, USER_SESSION_TTL) });
 }
 
 async function logout(request, env) {
@@ -144,7 +148,7 @@ async function logout(request, env) {
 async function me(request, env) {
   const session = await getSession(request, env);
   if (!session) return fail('로그인이 필요해요.', 401, 'LOGIN_REQUIRED');
-  return json({ username: session.username || '관리자', role: session.role });
+  return json({ username: session.username || '관리자', name: session.name || '', role: session.role });
 }
 
 async function adminLogin(request, env) {
@@ -165,6 +169,7 @@ async function listUsers(env) {
     for (const key of page.keys) {
       users.push({
         username: key.metadata?.username || key.name.slice('user:'.length),
+        name: key.metadata?.name || '',
         status: key.metadata?.status || 'pending',
         createdAt: key.metadata?.createdAt || 0
       });
@@ -189,7 +194,7 @@ async function updateUser(request, env) {
   const status = { approve: 'approved', reject: 'rejected', pending: 'pending' }[action];
   if (!STATUSES.includes(status)) return fail('잘못된 요청', 400);
   user.status = status;
-  await env.DB.put(userKey(username), JSON.stringify(user), { metadata: { username: user.username, status, createdAt: user.createdAt } });
+  await env.DB.put(userKey(username), JSON.stringify(user), { metadata: { username: user.username, name: user.name || '', status, createdAt: user.createdAt } });
   return json({ ok: true, status });
 }
 

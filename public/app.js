@@ -279,6 +279,7 @@ function field(label, input) {
 function renderAuth(token, mode = 'login', notice = '') {
   setTitle(mode === 'login' ? '로그인' : '가입하기');
   setActiveNav('');
+  const realName = el('input', { name: 'name', autocomplete: 'name', required: '', maxlength: '20' });
   const username = el('input', { name: 'username', autocomplete: 'username', required: '', maxlength: '20' });
   const password = el('input', {
     name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
@@ -292,6 +293,7 @@ function renderAuth(token, mode = 'login', notice = '') {
   });
 
   const form = el('form', { class: 'auth-form' },
+    mode === 'signup' ? field('이름 (본인 실명)', realName) : null,
     field('아이디', username),
     field('비밀번호', password),
     mode === 'signup' ? el('p', { class: 'auth-hint', text: '아이디는 한글·영문·숫자 2~20자, 비밀번호는 6자 이상이에요. 가입하면 관리자가 승인한 뒤에 쓸 수 있어요.' }) : null,
@@ -305,6 +307,7 @@ function renderAuth(token, mode = 'login', notice = '') {
     message.textContent = '';
     try {
       const body = { username: username.value.trim(), password: password.value };
+      if (mode === 'signup') body.name = realName.value.trim();
       if (mode === 'signup') {
         await api('/api/auth/signup', { method: 'POST', body });
         renderAuth(token, 'login', '가입 신청이 완료됐어요! 관리자가 승인하면 로그인할 수 있어요.');
@@ -322,7 +325,7 @@ function renderAuth(token, mode = 'login', notice = '') {
     el('h1', { class: 'auth-title', text: 'School YouTube' }),
     el('div', { class: 'auth-tabs' }, tab('login', '로그인'), tab('signup', '가입하기')),
     form));
-  username.focus();
+  (mode === 'signup' ? realName : username).focus();
 }
 
 // ---------- 관리자: 가입 승인 ----------
@@ -397,7 +400,9 @@ async function renderAdmin(token) {
       rejected: [btn('승인', 'approve', 'approve'), btn('삭제', 'delete', 'danger')]
     }[user.status] || [];
     row.append(
-      el('div', { class: 'admin-user' }, el('strong', { text: user.username }), el('span', { text: date })),
+      el('div', { class: 'admin-user' },
+        el('strong', { text: user.name || '(이름 없음)' }),
+        el('span', { text: [`아이디 ${user.username}`, date].filter(Boolean).join(' · ') })),
       el('div', { class: 'admin-actions' }, ...actions));
     return row;
   }
@@ -423,7 +428,7 @@ const accountSection = document.getElementById('accountSection');
 function updateAccountUI() {
   accountSection.hidden = !me || me.role === 'guest';
   if (!me) return;
-  document.getElementById('accountName').textContent = me.username;
+  document.getElementById('accountName').textContent = me.name ? `${me.name} (${me.username})` : me.username;
   document.getElementById('adminLink').hidden = me.role !== 'admin';
 }
 

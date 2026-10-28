@@ -47,7 +47,7 @@ async function call(path, { method = 'GET', body, cookie, contentType = 'applica
   return { status: res.status, body: await res.json(), cookie: setCookie ? setCookie.split(';')[0] : null, setCookie };
 }
 
-const signup = (username, password = 'pass1234') => call('/api/auth/signup', { method: 'POST', body: { username, password } });
+const signup = (username, password = 'pass1234', name = '홍길동') => call('/api/auth/signup', { method: 'POST', body: { username, password, name } });
 const login = (username, password = 'pass1234') => call('/api/auth/login', { method: 'POST', body: { username, password } });
 const adminLogin = (password = 'admin-secret') => call('/api/admin/login', { method: 'POST', body: { password } });
 const admin = async (action, username, cookie) => call('/api/admin/users', { method: 'POST', body: { action, username }, cookie });
@@ -72,13 +72,14 @@ test('가입 → 승인 대기 → 관리자 승인 → 로그인 → 영상 API
   assert.equal(a.status, 200);
   assert.match(a.setCookie, /HttpOnly; Secure; SameSite=Lax/);
   const list = await call('/api/admin/users', { cookie: a.cookie });
-  assert.deepEqual(list.body.map((u) => [u.username, u.status]), [['민수', 'pending']]);
+  assert.deepEqual(list.body.map((u) => [u.username, u.name, u.status]), [['민수', '홍길동', 'pending']]);
   assert.equal((await admin('approve', '민수', a.cookie)).status, 200);
 
   const ok = await login('민수');
   assert.equal(ok.status, 200);
   assert.ok(ok.cookie.startsWith('sy_session='));
-  assert.deepEqual((await call('/api/auth/me', { cookie: ok.cookie })).body, { username: '민수', role: 'user' });
+  assert.equal(ok.body.name, '홍길동');
+  assert.deepEqual((await call('/api/auth/me', { cookie: ok.cookie })).body, { username: '민수', name: '홍길동', role: 'user' });
   assert.equal((await call('/api/search?q=x', { cookie: ok.cookie })).status, 200);
 
   // 승인을 취소하면 바로 못 쓴다
@@ -115,6 +116,13 @@ test('가입 입력값 검사', async () => {
   assert.equal((await signup('공백 있음')).status, 400);
   assert.equal((await signup('<script>')).status, 400);
   assert.equal((await signup('okname', '123')).status, 400);
+  // 본인 이름은 꼭 적어야 하고, 글자와 띄어쓰기만 된다
+  assert.equal((await signup('noname', 'pass1234', '')).status, 400);
+  assert.equal((await signup('noname', 'pass1234', '   ')).status, 400);
+  assert.equal((await signup('noname', 'pass1234', '<b>김</b>')).status, 400);
+  assert.equal((await signup('noname', 'pass1234', '가'.repeat(21))).status, 400);
+  assert.equal((await signup('engname', 'pass1234', '  Kim   Min-su ')).status, 201);
+  assert.equal(JSON.parse(env.DB.store.get('user:engname').value).name, 'Kim Min-su');
   // JSON 이 아닌 요청(다른 사이트의 폼 전송 등)은 받지 않는다
   assert.equal((await call('/api/auth/signup', { method: 'POST', body: { username: 'formuser', password: 'pass1234' }, contentType: 'application/x-www-form-urlencoded' })).status, 400);
 });
