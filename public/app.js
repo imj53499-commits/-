@@ -348,4 +348,37 @@ document.getElementById('themeBtn').addEventListener('click', () => {
   try { localStorage.setItem('theme', next); } catch {}
 });
 
+// ---------- 빠른 나가기 ----------
+// 웹페이지는 자기 탭을 닫을 수 없어서, 화면을 바로 지우고 영상을 멈춘 뒤 다른 사이트로 이동한다.
+// location.replace 라서 이 페이지가 방문 기록에 남지 않는다.
+
+const EXIT_URL = 'https://www.google.com';
+
+function quickExit() {
+  document.documentElement.style.visibility = 'hidden';
+  document.title = 'Google';
+  document.querySelectorAll('iframe').forEach((f) => f.remove());
+  location.replace(EXIT_URL);
+}
+
+document.getElementById('exitBtn').addEventListener('click', quickExit);
+
+// ` 키 (숫자 1 왼쪽). 한/영 상태와 상관없이, 검색창에 입력 중이어도 동작한다.
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Backquote' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    quickExit();
+  }
+}, true);
+
+// 플레이어(iframe)를 클릭하면 키 입력이 플레이어로 가버려서 단축키가 안 먹힌다.
+// 클릭은 그대로 전달하고, 포커스만 바로 페이지로 되돌린다.
+const focusSink = el('div', { tabindex: '-1', 'aria-hidden': 'true', style: 'position:fixed;width:0;height:0;overflow:hidden' });
+document.body.append(focusSink);
+window.addEventListener('blur', () => {
+  setTimeout(() => {
+    if (document.activeElement?.tagName === 'IFRAME') focusSink.focus({ preventScroll: true });
+  }, 0);
+});
+
 route();
