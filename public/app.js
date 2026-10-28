@@ -363,13 +363,123 @@ function quickExit() {
 
 document.getElementById('exitBtn').addEventListener('click', quickExit);
 
-// ` 키 (숫자 1 왼쪽). 한/영 상태와 상관없이, 검색창에 입력 중이어도 동작한다.
+// ---------- 빠른 나가기 단축키 (설정에서 바꿀 수 있고, 이 브라우저에 저장된다) ----------
+// 키는 e.code 로 비교해서 한/영 상태와 상관없이 같은 키로 동작한다.
+
+const DEFAULT_SHORTCUT = { code: 'Backquote', ctrl: false, alt: false, shift: false, meta: false };
+const MODIFIER_CODES = /^(Control|Shift|Alt|Meta|OS)(Left|Right)?$|^(CapsLock|Fn|HangulMode|Hanja|Lang1|Lang2)$/;
+const CODE_NAMES = {
+  Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+  Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Space: 'Space', Escape: 'Esc',
+  Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete', Insert: 'Insert',
+  Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', IntlBackslash: '\\'
+};
+
+let shortcut = loadShortcut();
+let recording = false;
+
+function loadShortcut() {
+  try {
+    const saved = localStorage.getItem('exitShortcut');
+    if (saved === 'off') return null;
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed.code === 'string') return parsed;
+    }
+  } catch {}
+  return DEFAULT_SHORTCUT;
+}
+
+function saveShortcut(value) {
+  shortcut = value;
+  try { localStorage.setItem('exitShortcut', value ? JSON.stringify(value) : 'off'); } catch {}
+  updateShortcutLabels();
+}
+
+function keyName(code) {
+  if (CODE_NAMES[code]) return CODE_NAMES[code];
+  const m = code.match(/^(?:Key|Digit)(.)$/) || code.match(/^Numpad(.+)$/);
+  if (m) return code.startsWith('Numpad') ? `Num ${m[1]}` : m[1];
+  return code; // F1 등
+}
+
+function shortcutLabel(sc) {
+  if (!sc) return '없음';
+  return [sc.ctrl && 'Ctrl', sc.alt && 'Alt', sc.shift && 'Shift', sc.meta && 'Cmd', keyName(sc.code)].filter(Boolean).join(' + ');
+}
+
+function matchesShortcut(e, sc) {
+  return !!sc && e.code === sc.code && e.ctrlKey === !!sc.ctrl && e.altKey === !!sc.alt &&
+    e.shiftKey === !!sc.shift && e.metaKey === !!sc.meta;
+}
+
+// 글자/숫자/스페이스만 단독으로 정했다면, 검색창에 입력하는 중에는 나가지 않는다 (글자를 칠 수 있게).
+function isTypingKey(sc) {
+  return !sc.ctrl && !sc.alt && !sc.meta && /^(Key.|Digit.|Space|Numpad\d)$/.test(sc.code);
+}
+
+function isTypingTarget(target) {
+  return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+}
+
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Backquote' && !e.ctrlKey && !e.altKey && !e.metaKey) {
-    e.preventDefault();
-    quickExit();
-  }
+  if (recording) return;
+  if (!matchesShortcut(e, shortcut)) return;
+  if (isTypingKey(shortcut) && isTypingTarget(e.target)) return;
+  e.preventDefault();
+  quickExit();
 }, true);
+
+// ---------- 단축키 설정 창 ----------
+
+const settingsDialog = document.getElementById('settingsDialog');
+const shortcutLabelEl = document.getElementById('shortcutLabel');
+const shortcutChangeBtn = document.getElementById('shortcutChange');
+const exitBtn = document.getElementById('exitBtn');
+
+function updateShortcutLabels() {
+  shortcutLabelEl.textContent = shortcutLabel(shortcut);
+  exitBtn.title = shortcut ? `빠른 나가기 (${shortcutLabel(shortcut)})` : '빠른 나가기';
+}
+
+function stopRecording() {
+  recording = false;
+  shortcutChangeBtn.textContent = '바꾸기';
+  shortcutChangeBtn.classList.remove('recording');
+  window.removeEventListener('keydown', recordKey, true);
+}
+
+function recordKey(e) {
+  if (MODIFIER_CODES.test(e.code) || !e.code) return; // Ctrl 같은 키만 누른 상태면 다음 키를 기다린다
+  e.preventDefault();
+  e.stopPropagation();
+  saveShortcut({ code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
+  stopRecording();
+}
+
+shortcutChangeBtn.addEventListener('click', () => {
+  if (recording) return stopRecording();
+  recording = true;
+  shortcutChangeBtn.textContent = '원하는 키를 누르세요…';
+  shortcutChangeBtn.classList.add('recording');
+  window.addEventListener('keydown', recordKey, true);
+});
+
+document.getElementById('shortcutReset').addEventListener('click', () => { stopRecording(); saveShortcut(DEFAULT_SHORTCUT); });
+document.getElementById('shortcutOff').addEventListener('click', () => { stopRecording(); saveShortcut(null); });
+document.getElementById('settingsClose').addEventListener('click', () => settingsDialog.close());
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  updateShortcutLabels();
+  settingsDialog.showModal();
+});
+
+// 키를 기다리는 중에 Esc 를 누르면 창이 닫히는 대신 Esc 가 단축키로 저장되게 한다.
+settingsDialog.addEventListener('cancel', (e) => { if (recording) e.preventDefault(); });
+settingsDialog.addEventListener('close', stopRecording);
+settingsDialog.addEventListener('click', (e) => { if (e.target === settingsDialog) settingsDialog.close(); });
+
+updateShortcutLabels();
 
 // 플레이어(iframe)를 클릭하면 키 입력이 플레이어로 가버려서 단축키가 안 먹힌다.
 // 클릭은 그대로 전달하고, 포커스만 바로 페이지로 되돌린다.
