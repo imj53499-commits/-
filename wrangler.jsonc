@@ -3,5 +3,9 @@
   // Cloudflare Pages 설정. 대시보드의 빌드 설정보다 이 파일이 우선한다.
   "name": "schoolyoutube",
   "pages_build_output_dir": "./public",
-  "compatibility_date": "2025-10-01"
+  "compatibility_date": "2025-10-01",
+  // 계정과 로그인 세션 저장소 (Workers KV: schoolyoutube)
+  "kv_namespaces": [
+    { "binding": "DB", "id": "e3dc0f97ccaa4302aad8766a2588973c" }
+  ]
 }
