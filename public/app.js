@@ -175,8 +175,9 @@ async function renderWatch(id, token) {
   setActiveNav('');
   const player = el('div', { class: 'player' },
     el('iframe', {
-      src: `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1`,
+      src: `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`,
       title: '동영상 플레이어',
+      onload: (e) => listenToPlayer(e.target),
       allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
       allowfullscreen: '',
       referrerpolicy: 'strict-origin-when-cross-origin'
@@ -557,7 +558,50 @@ document.getElementById('themeBtn').addEventListener('click', () => {
   try { localStorage.setItem('theme', next); } catch {}
 });
 
-// ---------- 빠른 나가기 ----------
+// ---------- 플레이어 제어 (가리기 할 때 멈추고, 돌아오면 다시 재생) ----------
+// YouTube 임베드 플레이어와 postMessage 로 주고받는다. playerState 1 = 재생 중
+
+let playerState = -1;
+
+function listenToPlayer(iframe) {
+  playerState = -1;
+  iframe.contentWindow?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
+}
+
+function playerCommand(func) {
+  const iframe = document.querySelector('.player iframe');
+  iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*');
+}
+
+window.addEventListener('message', (e) => {
+  if (!/^https:\/\/www\.youtube(-nocookie)?\.com$/.test(e.origin)) return;
+  let data;
+  try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+  if (typeof data?.info?.playerState === 'number') playerState = data.info.playerState;
+});
+
+// ---------- 가리기 (단축키: 한 번 누르면 빈 화면, 다시 누르면 원래 화면) ----------
+
+const cover = el('div', { class: 'cover', hidden: '' });
+document.body.append(cover);
+let resumeAfterCover = false;
+
+function toggleCover() {
+  if (cover.hidden) {
+    resumeAfterCover = playerState === 1;
+    playerCommand('pauseVideo');
+    document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+    closeMobileSearch();
+    cover.hidden = false;
+    focusSink.focus({ preventScroll: true });
+  } else {
+    cover.hidden = true;
+    if (resumeAfterCover) playerCommand('playVideo');
+    resumeAfterCover = false;
+  }
+}
+
+// ---------- 빠른 나가기 (버튼: Google 로 완전히 나가기) ----------
 // 웹페이지는 자기 탭을 닫을 수 없어서, 화면을 바로 지우고 영상을 멈춘 뒤 다른 사이트로 이동한다.
 // location.replace 라서 이 페이지가 방문 기록에 남지 않는다.
 
@@ -572,7 +616,7 @@ function quickExit() {
 
 document.getElementById('exitBtn').addEventListener('click', quickExit);
 
-// ---------- 빠른 나가기 단축키 (설정에서 바꿀 수 있고, 이 브라우저에 저장된다) ----------
+// ---------- 가리기 단축키 (설정에서 바꿀 수 있고, 이 브라우저에 저장된다) ----------
 // 키는 e.code 로 비교해서 한/영 상태와 상관없이 같은 키로 동작한다.
 
 const DEFAULT_SHORTCUT = { code: 'Backquote', ctrl: false, alt: false, shift: false, meta: false };
@@ -637,7 +681,7 @@ window.addEventListener('keydown', (e) => {
   if (!matchesShortcut(e, shortcut)) return;
   if (isTypingKey(shortcut) && isTypingTarget(e.target)) return;
   e.preventDefault();
-  quickExit();
+  toggleCover();
 }, true);
 
 // ---------- 단축키 설정 창 ----------
@@ -649,7 +693,7 @@ const exitBtn = document.getElementById('exitBtn');
 
 function updateShortcutLabels() {
   shortcutLabelEl.textContent = shortcutLabel(shortcut);
-  exitBtn.title = shortcut ? `빠른 나가기 (${shortcutLabel(shortcut)})` : '빠른 나가기';
+  exitBtn.title = 'Google로 나가기';
 }
 
 function stopRecording() {

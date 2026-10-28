@@ -238,6 +238,10 @@ body.auth-mode .content { padding-left: 16px; padding-right: 16px; }
 
 .search-back, .search-open-btn { display: none; }
 
+/* 가리기: 아무것도 없는 빈 화면 */
+.cover { position: fixed; inset: 0; z-index: 1000; background: var(--bg); cursor: default; }
+.cover[hidden] { display: none; }
+
 /* ---------- 휴대폰 ---------- */
 @media (max-width: 800px) {
   :root { --topbar-h: 48px; --bottom-h: 56px; }
