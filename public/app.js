@@ -7,6 +7,7 @@ import {
   embedUrl, sendToPlayer, listenTo, readPlayerMessage, autostart, loadAutoplay, saveAutoplay,
   loadHistory, recordWatch, clearHistory, pickNext, loadPopupBounds, ENDED, PAUSED
 } from './player.js';
+import { PRESETS, loadDisguise, saveDisguise, applyDisguise, cleanDomain, iconFor, isDisguiseKey } from './disguise.js';
 
 const app = document.getElementById('app');
 const cardTpl = document.getElementById('cardTpl');
@@ -78,11 +79,9 @@ function skeletonGrid(count = 12) {
   return grid;
 }
 
-// 브라우저 방문 기록·탭에는 이 제목만 남는다. 영상 제목이나 검색어, 사이트 이름은 넣지 않는다.
-const PAGE_TITLE = 'Google';
-
+// 브라우저 방문 기록·탭에는 '탭 모양'에서 정한 제목만 남는다 (기본 Google). 영상 제목이나 검색어는 넣지 않는다.
 function setTitle() {
-  document.title = PAGE_TITLE;
+  document.title = loadDisguise().title;
 }
 
 function setActiveNav(key) {
@@ -1195,6 +1194,7 @@ document.getElementById('clearHistoryBtn').addEventListener('click', () => {
 
 document.getElementById('settingsBtn').addEventListener('click', () => {
   updateShortcutLabels();
+  updateDisguiseUI();
   updateHistoryInfo();
   settingsDialog.showModal();
 });
@@ -1207,5 +1207,73 @@ settingsDialog.addEventListener('click', (e) => { if (e.target === settingsDialo
 updateShortcutLabels();
 
 const focusSink = keepKeyboardFocus();
+
+// ---------- 탭 모양 (설정 창) ----------
+
+const disguisePreset = document.getElementById('disguisePreset');
+const disguiseCustom = document.getElementById('disguiseForm');
+const disguiseDomain = document.getElementById('disguiseDomain');
+const disguiseTitle = document.getElementById('disguiseTitleInput');
+const disguiseError = document.getElementById('disguiseError');
+
+for (const p of PRESETS) disguisePreset.append(el('option', { value: p.id, text: p.label }));
+disguisePreset.append(el('option', { value: 'custom', text: '직접 입력…' }));
+
+function showDisguisePreview(title, domain) {
+  document.getElementById('disguisePreviewTitle').textContent = title || '(제목 없음)';
+  document.getElementById('disguisePreviewIcon').src = iconFor(domain);
+}
+
+function updateDisguiseUI() {
+  const d = loadDisguise();
+  disguisePreset.value = d.preset;
+  disguiseCustom.hidden = d.preset !== 'custom';
+  disguiseDomain.value = d.domain;
+  disguiseTitle.value = d.title;
+  disguiseError.textContent = '';
+  showDisguisePreview(d.title, d.domain);
+}
+
+function setDisguise(d) {
+  saveDisguise(d);
+  applyDisguise(d);
+  showDisguisePreview(d.title, d.domain);
+}
+
+disguisePreset.addEventListener('change', () => {
+  const preset = PRESETS.find((p) => p.id === disguisePreset.value);
+  disguiseCustom.hidden = !!preset;
+  disguiseError.textContent = '';
+  if (preset) setDisguise({ preset: preset.id, title: preset.title, domain: preset.domain });
+  else disguiseDomain.focus();
+});
+
+// 직접 입력: 주소를 넣으면 미리보기 아이콘이 바로 바뀌고, 적용을 누르면 저장한다.
+disguiseDomain.addEventListener('input', () => showDisguisePreview(disguiseTitle.value.trim(), cleanDomain(disguiseDomain.value)));
+disguiseTitle.addEventListener('input', () => showDisguisePreview(disguiseTitle.value.trim(), cleanDomain(disguiseDomain.value)));
+
+document.getElementById('disguiseForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const domain = cleanDomain(disguiseDomain.value);
+  const title = disguiseTitle.value.trim().slice(0, 80);
+  if (disguiseDomain.value.trim() && !domain) {
+    disguiseError.textContent = '사이트 주소를 확인해 주세요. 예: classroom.google.com';
+    return;
+  }
+  if (!title) {
+    disguiseError.textContent = '탭 제목을 적어 주세요.';
+    return;
+  }
+  disguiseError.textContent = '';
+  setDisguise({ preset: 'custom', title, domain });
+  disguiseError.textContent = '적용했어요.';
+});
+
+// 다른 탭(팝업 포함)에서 바꾸면 여기도 바로 맞춘다.
+window.addEventListener('storage', (e) => {
+  if (isDisguiseKey(e.key)) applyDisguise();
+});
+
+applyDisguise();
 
 loadMe().then(route);

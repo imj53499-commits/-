@@ -6,6 +6,7 @@ import {
 import {
   embedUrl, listenTo, readPlayerMessage, autostart, loadAutoplay, recordWatch, pickNext, savePopupBounds, ENDED
 } from './player.js';
+import { applyDisguise, isDisguiseKey } from './disguise.js';
 
 const VIDEO_ID = /^[\w-]{11}$/;
 const params = new URLSearchParams(location.search);
@@ -116,5 +117,11 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(rememberBounds, 300);
 });
 window.addEventListener('pagehide', rememberBounds);
+
+// 탭 모양(제목·아이콘)은 메인 화면 설정을 따른다.
+applyDisguise();
+window.addEventListener('storage', (e) => {
+  if (isDisguiseKey(e.key)) applyDisguise();
+});
 
 keepKeyboardFocus();

@@ -223,6 +223,22 @@ body.sidebar-collapsed .content { padding-left: 24px; }
 .account-section { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 .account-section h2 { margin-bottom: 12px; }
 .history-section { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.disguise-section { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.disguise-section h2 { margin-bottom: 6px; }
+/* 미리보기: 브라우저 탭처럼 */
+.disguise-preview {
+  display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; margin-bottom: 10px; max-width: 240px;
+  border-radius: 10px 10px 0 0; background: var(--bg-soft); border-bottom: 2px solid var(--accent); font-size: 13px;
+}
+.disguise-preview img { width: 16px; height: 16px; flex-shrink: 0; }
+.disguise-preview span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings select, .disguise-custom input {
+  width: 100%; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; font-size: 15px;
+}
+.disguise-custom { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.disguise-custom[hidden] { display: none; }
+.disguise-custom .hint { margin: 0; }
 .settings-link[hidden] { display: none; }
 .settings-link {
   display: flex; align-items: center; justify-content: center; height: 40px; margin-bottom: 8px;
