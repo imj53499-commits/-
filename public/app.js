@@ -68,8 +68,11 @@ function skeletonGrid(count = 12) {
   return grid;
 }
 
-function setTitle(text) {
-  document.title = text ? `${text} - School YouTube` : 'School YouTube';
+// 브라우저 방문 기록·탭에는 이 제목만 남는다. 영상 제목이나 검색어, 사이트 이름은 넣지 않는다.
+const PAGE_TITLE = '학습 자료';
+
+function setTitle() {
+  document.title = PAGE_TITLE;
 }
 
 function setActiveNav(key) {
