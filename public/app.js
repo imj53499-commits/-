@@ -253,15 +253,70 @@ async function renderSearch(q, token) {
   searchInput.value = q;
   app.replaceChildren(skeletonGrid(8));
   try {
-    const items = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
     if (token !== renderToken) return;
-    app.replaceChildren(items.length
-      ? videoGrid(items, 'list search-results')
-      : errorView(`'${q}'에 대한 검색 결과가 없어요.`));
+    if (!data.items.length) {
+      app.replaceChildren(errorView(`'${q}'에 대한 검색 결과가 없어요.`));
+      return;
+    }
+    const list = videoGrid(data.items, 'list search-results');
+    const status = el('div', { class: 'feed-status' });
+    app.replaceChildren(list, status);
+    const seen = new Set(data.items.map((v) => v.id));
+    let next = data.next;
+    if (next) {
+      infiniteScroll(token, status, async () => {
+        const page = await api(`/api/search?cont=${encodeURIComponent(next)}`);
+        next = page.next;
+        appendNew(list, page.items, seen);
+        return !!next;
+      });
+    }
   } catch (err) {
     if (token !== renderToken) return;
     app.replaceChildren(errorView(err.message, () => route()));
   }
+}
+
+function appendNew(container, items, seen) {
+  const fresh = items.filter((v) => !seen.has(v.id));
+  for (const v of fresh) seen.add(v.id);
+  container.append(...fresh.map(videoCard));
+}
+
+// 목록 아래 끝(status)이 가까워지면 loadMore() 로 다음 페이지를 붙인다. loadMore 는 더 있으면 true.
+function infiniteScroll(token, status, loadMore) {
+  let busy = false;
+  let done = false;
+  const observer = new IntersectionObserver((entries) => {
+    if (token !== renderToken) return observer.disconnect();
+    if (entries.some((e) => e.isIntersecting)) run();
+  }, { rootMargin: '1200px 0px' });
+
+  async function run() {
+    if (busy || done || token !== renderToken) return;
+    busy = true;
+    status.replaceChildren(el('div', { class: 'feed-loading', text: '불러오는 중…' }));
+    try {
+      const more = await loadMore();
+      if (token !== renderToken) return;
+      status.replaceChildren();
+      if (!more) {
+        done = true;
+        observer.disconnect();
+        return;
+      }
+    } catch (err) {
+      if (token !== renderToken) return;
+      status.replaceChildren(errorView(err.message, () => { busy = false; run(); }));
+      return;
+    }
+    busy = false;
+    // 새로 붙은 게 적어서 아직 끝이 보이면 바로 다음 페이지
+    if (status.getBoundingClientRect().top < innerHeight + 1200) run();
+  }
+
+  observer.observe(status);
 }
 
 function linkify(text) {
@@ -353,13 +408,29 @@ async function renderChannel(id, token) {
     setTitle(c.name);
     const banner = safeImg(c.banner) ? el('div', { class: 'channel-banner' }) : null;
     if (banner) banner.style.backgroundImage = `url("${c.banner.replace(/"/g, '%22')}")`;
+    const grid = videoGrid(c.videos);
+    const status = el('div', { class: 'feed-status' });
     app.replaceChildren(
       banner ?? '',
       el('div', { class: 'channel-head' },
         safeImg(c.avatar) ? el('img', { src: c.avatar, alt: '' }) : null,
         el('div', {}, el('h1', { text: c.name }), el('p', { text: c.description }))),
       el('h2', { class: 'section-title', text: '동영상' }),
-      c.videos.length ? videoGrid(c.videos) : errorView('영상이 없어요.'));
+      c.videos.length ? grid : errorView('영상이 없어요.'),
+      status);
+    const seen = new Set(c.videos.map((v) => v.id));
+    let next = c.next;
+    if (next && c.videos.length) {
+      infiniteScroll(token, status, async () => {
+        const page = await api(`/api/channel?cont=${encodeURIComponent(next)}`);
+        next = page.next;
+        const videos = page.videos.map((v) => ({
+          ...v, channel: v.channel || c.name, channelId: v.channelId || c.id, channelAvatar: v.channelAvatar || c.avatar
+        }));
+        appendNew(grid, videos, seen);
+        return !!next;
+      });
+    }
   } catch (err) {
     if (token !== renderToken) return;
     app.replaceChildren(errorView(err.message, () => route()));
@@ -367,6 +438,23 @@ async function renderChannel(id, token) {
 }
 
 // ---------- 쇼츠: 세로로 한 개씩 넘겨 보기 ----------
+
+// 본 쇼츠 ID (최근 500개). 다음에 쇼츠를 열 때 이미 본 건 건너뛴다.
+const SHORTS_SEEN_KEY = 'shortsSeen';
+
+function loadShortsSeen() {
+  try {
+    const list = JSON.parse(localStorage.getItem(SHORTS_SEEN_KEY) || '[]');
+    return Array.isArray(list) ? list.filter((id) => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberShort(id) {
+  const list = [id, ...loadShortsSeen().filter((x) => x !== id)].slice(0, 500);
+  try { localStorage.setItem(SHORTS_SEEN_KEY, JSON.stringify(list)); } catch {}
+}
 // 화면에 보이는 쇼츠 하나에만 플레이어를 넣고, 나머지는 썸네일로 둔다 (가볍게).
 
 function shortPlayer(id) {
@@ -399,7 +487,10 @@ async function renderShorts(token) {
   app.replaceChildren(feed);
   document.body.classList.add('shorts-mode');
 
-  const seen = new Set();
+  // 방문마다 다른 순서(seed)로 검색하고, 전에 본 쇼츠는 빼서 같은 쇼츠가 반복되지 않게 한다.
+  const seed = 1 + Math.floor(Math.random() * 2 ** 30);
+  const watchedShorts = loadShortsSeen();
+  const seen = new Set(watchedShorts);
   let page = 0;
   let loading = false;
   let active = null;
@@ -408,31 +499,39 @@ async function renderShorts(token) {
     if (active === slide) return;
     if (active) active.querySelector('iframe')?.remove();
     active = slide;
+    rememberShort(slide.dataset.id);
     playerState = -1;
     slide.querySelector('.short-frame').append(shortPlayer(slide.dataset.id));
     // 끝에서 세 번째쯤 오면 다음 쇼츠를 미리 불러온다
     const slides = feed.querySelectorAll('.short');
-    if ([...slides].indexOf(slide) >= slides.length - 3) loadMore();
+    if ([...slides].indexOf(slide) >= slides.length - 8) loadMore();
   }
 
   const observer = new IntersectionObserver((entries) => {
     for (const entry of entries) if (entry.isIntersecting) activate(entry.target);
   }, { root: feed, threshold: 0.6 });
 
-  async function loadMore() {
+  async function loadMore(tries = 0) {
     if (loading) return;
     loading = true;
     try {
-      const items = await api(`/api/shorts?page=${page++}`);
+      const items = await api(`/api/shorts?page=${page++}&seed=${seed}`);
       if (token !== renderToken) return;
-      feed.querySelector('.shorts-loading')?.remove();
-      for (const v of items) {
+      let added = 0;
+      for (const v of shuffle(items)) {
         if (seen.has(v.id)) continue;
         seen.add(v.id);
         const slide = shortSlide(v);
         feed.append(slide);
         observer.observe(slide);
+        added++;
       }
+      // 새 쇼츠가 거의 없었으면(다 본 것) 다음 검색어로 바로 더 찾는다
+      if (added < 5 && tries < 4) {
+        loading = false;
+        return await loadMore(tries + 1);
+      }
+      feed.querySelector('.shorts-loading')?.remove();
       if (!feed.querySelector('.short')) feed.replaceChildren(errorView('쇼츠를 찾지 못했어요.', () => route()));
     } catch (err) {
       if (token !== renderToken) return;
@@ -949,6 +1048,7 @@ function updateHistoryInfo() {
 
 document.getElementById('clearHistoryBtn').addEventListener('click', () => {
   clearHistory();
+  try { localStorage.removeItem(SHORTS_SEEN_KEY); } catch {}
   updateHistoryInfo();
 });
 

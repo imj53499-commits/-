@@ -26,7 +26,7 @@ function fakeKV() {
   };
 }
 
-const fakeYt = { search: async () => [{ id: 'aaaaaaaaaaa', title: '영상' }] };
+const fakeYt = { searchPage: async () => ({ items: [{ id: 'aaaaaaaaaaa', title: '영상' }], next: null }) };
 
 let env;
 beforeEach(() => {

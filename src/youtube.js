@@ -167,6 +167,28 @@ export function extractVideos(root, limit = 40) {
   return out;
 }
 
+// 목록 끝에 있는 '더 보기' 토큰. 이걸 다시 보내면 다음 결과를 준다.
+export function findContinuation(root) {
+  let token = null;
+  const stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object') continue;
+    const t = node.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token;
+    if (t) {
+      token = t;
+      continue;
+    }
+    for (const key in node) {
+      const child = node[key];
+      if (child && typeof child === 'object') stack.push(child);
+    }
+  }
+  return token;
+}
+
+export const CONTINUATION = /^[\w%=-]{10,3000}$/;
+
 // ---------- API 호출 ----------
 
 export function createYouTube(fetchFn = fetch) {
@@ -181,9 +203,17 @@ export function createYouTube(fetchFn = fetch) {
   }
 
   return {
+    // 검색 한 페이지. continuation 을 주면 그 다음 페이지. → { items, next }
+    async searchPage(query, continuation) {
+      const data = continuation
+        ? await call('search', { continuation })
+        : await call('search', { query, params: SEARCH_VIDEOS_ONLY });
+      const root = continuation ? data.onResponseReceivedCommands : data.contents;
+      return { items: extractVideos(root, 40).filter((v) => !v.isShort), next: findContinuation(root) };
+    },
+
     async search(query) {
-      const data = await call('search', { query, params: SEARCH_VIDEOS_ONLY });
-      return extractVideos(data.contents, 40).filter((v) => !v.isShort);
+      return (await this.searchPage(query)).items;
     },
 
     // 쇼츠만 골라 온다. 검색 결과의 쇼츠 묶음(reelShelf)과 쇼츠 링크가 걸린 영상을 모은다.
@@ -242,7 +272,14 @@ export function createYouTube(fetchFn = fetch) {
         channelId: v.channelId || id,
         channelAvatar: v.channelAvatar || avatar
       }));
-      return { id, name, avatar, banner: lastUrl(banner), description: meta.description || '', videos };
+      return { id, name, avatar, banner: lastUrl(banner), description: meta.description || '', videos, next: findContinuation(data.contents) };
+    },
+
+    // 채널 동영상 다음 페이지 → { items, next }
+    async channelMore(continuation) {
+      const data = await call('browse', { continuation });
+      const root = data.onResponseReceivedActions || data.onResponseReceivedEndpoints;
+      return { items: extractVideos(root, 48), next: findContinuation(root) };
     }
   };
 }

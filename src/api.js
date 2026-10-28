@@ -1,4 +1,4 @@
-import { VIDEO_ID, CHANNEL_ID } from './youtube.js';
+import { VIDEO_ID, CHANNEL_ID, CONTINUATION } from './youtube.js';
 
 // 로그인하지 않은 상태의 홈 피드는 비어 있고 모두에게 똑같아서, 카테고리별 검색어 묶음으로 채운다.
 // 방문할 때마다 다른 순서(seed)로 검색어를 고르고, 아래로 내릴 때마다(page) 다음 검색어를 쓴다.
@@ -36,7 +36,11 @@ function seededShuffle(list, seed) {
 }
 
 export function homeQueries(category, page, seed) {
-  const pool = seededShuffle(CATEGORIES[category], seed);
+  return pageQueries(CATEGORIES[category], page, seed);
+}
+
+function pageQueries(list, page, seed) {
+  const pool = seededShuffle(list, seed);
   const queries = [];
   for (let i = 0; i < QUERIES_PER_PAGE; i++) {
     const n = page * QUERIES_PER_PAGE + i;
@@ -46,9 +50,13 @@ export function homeQueries(category, page, seed) {
 }
 
 // 쇼츠 피드용 검색어. page 마다 다음 검색어 묶음을 써서 계속 새 쇼츠를 불러온다.
+// 홈과 같은 방식으로, 방문(seed)마다 다른 순서로 고르고 페이지마다 다음 검색어를 쓴다.
 export const SHORTS_QUERIES = [
-  ['#shorts', '쇼츠 인기'], ['웃긴 쇼츠', '#shorts 동물'], ['#shorts 게임', '#shorts 음악'],
-  ['#shorts 먹방', '#shorts 스포츠'], ['#shorts 댄스', '#shorts 꿀팁']
+  '#shorts', '쇼츠 인기', '웃긴 쇼츠', '#shorts 동물', '#shorts 게임', '#shorts 음악', '#shorts 먹방',
+  '#shorts 스포츠', '#shorts 댄스', '#shorts 꿀팁', '#shorts 요리', '#shorts 고양이', '#shorts 강아지',
+  '#shorts 축구', '#shorts 마인크래프트', '#shorts 밈', '#shorts 실험', '#shorts 여행', '#shorts 운동',
+  '#shorts 메이크업', '#shorts 그림', '#shorts 피아노', '#shorts 커버', '#shorts 리뷰', '#shorts 과학',
+  '#shorts 상황극', '#shorts 브이로그', '#shorts 자동차', '#shorts 농구', '#shorts 아이돌'
 ];
 
 // 추천에 쓰는 최근 시청 영상 수. 영상마다 YouTube 요청이 하나씩 들어서 무료 플랜 CPU 제한을 생각해 작게 둔다.
@@ -121,19 +129,24 @@ export async function handleApi(url, yt) {
         return json(await home(yt, category, page, seed));
       }
       case '/api/shorts': {
-        const page = Math.max(0, Math.min(Number.parseInt(q('page', 3), 10) || 0, 99));
-        const queries = SHORTS_QUERIES[page % SHORTS_QUERIES.length];
-        return json(await cached(`shorts:${page}`, async () => {
-          const settled = await Promise.allSettled(queries.map((query) => yt.shorts(query)));
-          const lists = settled.filter((s) => s.status === 'fulfilled').map((s) => s.value);
-          if (!lists.length) throw settled[0].reason;
-          return interleave(lists, 30);
-        }));
+        const page = Math.max(0, Math.min(Number.parseInt(q('page', 3), 10) || 0, MAX_HOME_PAGE));
+        const seed = Number.parseInt(q('seed', 10), 10) || 1;
+        const queries = pageQueries(SHORTS_QUERIES, page, seed);
+        const settled = await Promise.allSettled(queries.map((query) => cached(`shorts:${query}`, () => yt.shorts(query))));
+        const lists = settled.filter((s) => s.status === 'fulfilled').map((s) => s.value);
+        if (!lists.length) throw settled[0].reason;
+        return json(interleave(lists, 40));
       }
+      // 검색: { items, next }. next 를 cont 로 다시 보내면 다음 페이지 (아래로 계속 내리기)
       case '/api/search': {
+        const cont = q('cont', 3000);
+        if (cont) {
+          if (!CONTINUATION.test(cont)) return json({ error: '잘못된 요청' }, 400);
+          return json(await cached(`searchc:${cont}`, () => yt.searchPage(null, cont)));
+        }
         const query = q('q', 200);
-        if (!query) return json([]);
-        return json(await cached(`search:${query}`, () => yt.search(query)));
+        if (!query) return json({ items: [], next: null });
+        return json(await cached(`searchp:${query}`, () => yt.searchPage(query)));
       }
       case '/api/suggest': {
         const query = q('q', 100);
@@ -155,6 +168,12 @@ export async function handleApi(url, yt) {
         return json(interleave(lists, 40).filter((v) => !ids.includes(v.id)));
       }
       case '/api/channel': {
+        const cont = q('cont', 3000);
+        if (cont) {
+          if (!CONTINUATION.test(cont)) return json({ error: '잘못된 요청' }, 400);
+          const page = await cached(`channelc:${cont}`, () => yt.channelMore(cont));
+          return json({ videos: page.items, next: page.next });
+        }
         const id = q('id', 30);
         if (!CHANNEL_ID.test(id)) return json({ error: '잘못된 채널 ID' }, 400);
         return json(await cached(`channel:${id}`, () => yt.channel(id)));

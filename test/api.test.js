@@ -44,7 +44,12 @@ const lockup = (id, title, contentType = 'LOCKUP_CONTENT_TYPE_VIDEO') => ({
 });
 
 const responses = {
-  search: (body) => ({
+  search: (body) => body.continuation ? {
+    onResponseReceivedCommands: [{ appendContinuationItemsAction: { continuationItems: [
+      videoRenderer('cont0000001', '다음 페이지 영상'),
+      { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'TOKEN_page3_xyz' } } } }
+    ] } }]
+  } : ({
     contents: {
       twoColumnSearchResultsRenderer: {
         primaryContents: {
@@ -61,13 +66,17 @@ const responses = {
                   { videoRenderer: { ...videoRenderer('short000003', '쇼츠 셋').videoRenderer, navigationEndpoint: { reelWatchEndpoint: { videoId: 'short000003' } } } }
                 ]
               }
-            }]
+            }, { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'TOKEN_page2_abc' } } } }]
           }
         }
       }
     }
   }),
-  browse: (body) => body.browseId === 'FEwhat_to_watch'
+  browse: (body) => body.continuation
+    ? { onResponseReceivedActions: [{ appendContinuationItemsAction: { continuationItems: [
+        { richItemRenderer: { content: videoRenderer('chv00000002', '채널 다음 영상') } }
+      ] } }] }
+    : body.browseId === 'FEwhat_to_watch'
     ? { contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { content: { richGridRenderer: { contents: [] } } } }] } } }
     : {
         metadata: { channelMetadataRenderer: { title: '테스트 채널', description: '채널 설명', avatar: { thumbnails: [{ url: 'https://yt3.ggpht.com/a.jpg' }] } } },
@@ -142,11 +151,26 @@ test('알 수 없는 카테고리는 전체로 처리', async () => {
 
 test('검색: 영상만 남기고 채널/쇼츠는 뺀다', async () => {
   const s = await get('/api/search?q=' + encodeURIComponent('고양이'));
-  assert.equal(s.body.length, 1);
-  assert.equal(s.body[0].title, '고양이 영상');
-  assert.equal(s.body[0].duration, '10:01');
-  assert.equal(s.body[0].meta, '조회수 1.2만회 · 3일 전');
-  assert.deepEqual((await get('/api/search')).body, []);
+  assert.equal(s.body.items.length, 1);
+  assert.equal(s.body.items[0].title, '고양이 영상');
+  assert.equal(s.body.items[0].duration, '10:01');
+  assert.equal(s.body.items[0].meta, '조회수 1.2만회 · 3일 전');
+  assert.equal(s.body.next, 'TOKEN_page2_abc');
+  assert.deepEqual((await get('/api/search')).body, { items: [], next: null });
+});
+
+test('검색: next 토큰으로 다음 페이지를 이어서 받는다', async () => {
+  const more = await get('/api/search?cont=TOKEN_page2_abc');
+  assert.deepEqual(more.body.items.map((v) => v.title), ['다음 페이지 영상']);
+  assert.equal(more.body.next, 'TOKEN_page3_xyz');
+  assert.equal((await get('/api/search?cont=' + encodeURIComponent('bad token!'))).status, 400);
+});
+
+test('채널: next 토큰으로 영상을 더 받는다', async () => {
+  const first = await get('/api/channel?id=UCaaaaaaaaaaaaaaaaaaaaaa');
+  assert.ok('next' in first.body);
+  const more = await get('/api/channel?cont=TOKEN_channel_more');
+  assert.deepEqual(more.body.videos.map((v) => v.id), ['chv00000002']);
 });
 
 test('쇼츠: 쇼츠만 모아서 주고, 일반 검색에서는 빠진다', async () => {
@@ -162,7 +186,7 @@ test('쇼츠: 쇼츠만 모아서 주고, 일반 검색에서는 빠진다', asy
   await get('/api/shorts?page=1');
   assert.ok(calls.length > 0);
   const s = await get('/api/search?q=' + encodeURIComponent('고양이'));
-  assert.ok(s.body.every((v) => !v.id.startsWith('short')));
+  assert.ok(s.body.items.every((v) => !v.id.startsWith('short')));
 });
 
 test('자동완성', async () => {
