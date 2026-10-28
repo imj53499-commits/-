@@ -69,7 +69,7 @@ function skeletonGrid(count = 12) {
 }
 
 // 브라우저 방문 기록·탭에는 이 제목만 남는다. 영상 제목이나 검색어, 사이트 이름은 넣지 않는다.
-const PAGE_TITLE = '학습 자료';
+const PAGE_TITLE = '새 탭';
 
 function setTitle() {
   document.title = PAGE_TITLE;
@@ -283,7 +283,11 @@ function renderAuth(token, mode = 'login', notice = '') {
   setTitle(mode === 'login' ? '로그인' : '가입하기');
   setActiveNav('');
   const realName = el('input', { name: 'name', autocomplete: 'name', required: '', maxlength: '20' });
-  const username = el('input', { name: 'username', autocomplete: 'username', required: '', maxlength: '20' });
+  // 가입할 때는 브라우저가 저장된 이메일을 아이디 칸에 추천하지 않게 자동 완성을 끈다.
+  const username = el('input', {
+    name: 'username', required: '', maxlength: '20', autocapitalize: 'off', spellcheck: 'false',
+    autocomplete: mode === 'login' ? 'username' : 'off'
+  });
   const password = el('input', {
     name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
     autocomplete: mode === 'login' ? 'current-password' : 'new-password'
@@ -299,7 +303,7 @@ function renderAuth(token, mode = 'login', notice = '') {
     mode === 'signup' ? field('이름 (본인 실명)', realName) : null,
     field('아이디', username),
     field('비밀번호', password),
-    mode === 'signup' ? el('p', { class: 'auth-hint', text: '아이디는 한글·영문·숫자 2~20자, 비밀번호는 6자 이상이에요. 가입하면 관리자가 승인한 뒤에 쓸 수 있어요.' }) : null,
+    mode === 'signup' ? el('p', { class: 'auth-hint', text: '이메일은 필요 없어요. 아이디는 한글·영문·숫자 2~20자, 비밀번호는 6자 이상이에요. 가입하면 관리자가 승인한 뒤에 쓸 수 있어요.' }) : null,
     message,
     submit);
 
