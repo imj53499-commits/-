@@ -6,6 +6,7 @@
 - Shorts: 세로로 한 개씩 넘겨 보기 (휴대폰은 위아래로 밀기, 컴퓨터는 휠이나 ↑↓ 키), 끝까지 가면 자동으로 더 불러옴
 - 검색 + 자동완성
 - 영상 재생 (YouTube 공식 임베드 플레이어), 설명, 관련 영상
+- 팝업으로 보기 (컴퓨터): 영상 화면의 버튼으로 작은 창에서 이어 보기. 팝업에서 단축키(기본 `Q`, ⚙에서 변경)를 누르면 바로 닫힘. 가리기 단축키를 누르면 팝업도 같이 닫힘
 - 채널 페이지
 - 다크 모드, 모바일 화면 지원
 - 브라우저 탭·방문 기록에는 항상 "새 탭" 이라는 제목과 회색 아이콘만 표시 (`public/app.js` 의 `PAGE_TITLE`)
@@ -62,7 +63,7 @@ npm test
 | `src/auth.js` | 가입, 로그인, 세션, 관리자 승인 (KV 저장) |
 | `src/api.js` | API 라우트 (`/api/home`, `/api/shorts`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
 | `src/youtube.js` | YouTube 내부 API 호출과 응답에서 영상 정보 추출 |
-| `public/` | 화면 (HTML/CSS/JS, 빌드 불필요) |
+| `public/` | 화면 (HTML/CSS/JS, 빌드 불필요). `popup.html`/`popup.js` 는 팝업 플레이어, `shortcuts.js` 는 단축키 공통 코드 |
 | `wrangler.jsonc` | Cloudflare Pages 설정 (출력 폴더 `public`) |
 
 ## 참고

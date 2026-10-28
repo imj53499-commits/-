@@ -1,3 +1,9 @@
+import {
+  COVER_SHORTCUT_KEY, POPUP_SHORTCUT_KEY, DEFAULT_COVER_SHORTCUT, DEFAULT_POPUP_SHORTCUT, MODIFIER_CODES,
+  loadShortcut, storeShortcut, shortcutFromEvent, shortcutLabel, matchesShortcut, isTypingKey, isTypingTarget,
+  keepKeyboardFocus
+} from './shortcuts.js';
+
 const app = document.getElementById('app');
 const cardTpl = document.getElementById('cardTpl');
 const searchForm = document.getElementById('searchForm');
@@ -213,7 +219,10 @@ async function renderWatch(id, token) {
       if (e.target.tagName !== 'A') desc.classList.add('open');
     });
 
-    info.replaceChildren(el('h1', { class: 'watch-title', text: v.title }), owner, desc);
+    const popupBtn = el('button', { class: 'popup-btn', type: 'button', onclick: () => openPopup(id) },
+      el('span', { text: '팝업으로 보기' }));
+    info.replaceChildren(el('h1', { class: 'watch-title', text: v.title }),
+      el('div', { class: 'watch-actions' }, owner, popupBtn), desc);
     related.replaceChildren(...v.related.map(videoCard));
   } catch (err) {
     if (token !== renderToken) return;
@@ -654,9 +663,11 @@ document.getElementById('themeBtn').addEventListener('click', () => {
 // YouTube 임베드 플레이어와 postMessage 로 주고받는다. playerState 1 = 재생 중
 
 let playerState = -1;
+let playerTime = 0;
 
 function listenToPlayer(iframe) {
   playerState = -1;
+  playerTime = 0;
   iframe.contentWindow?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
 }
 
@@ -670,7 +681,32 @@ window.addEventListener('message', (e) => {
   let data;
   try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
   if (typeof data?.info?.playerState === 'number') playerState = data.info.playerState;
+  if (typeof data?.info?.currentTime === 'number') playerTime = data.info.currentTime;
 });
+
+// ---------- 팝업으로 보기 (롱폼) ----------
+// 지금 보던 위치부터 작은 창에서 이어 보고, 원래 화면의 영상은 멈춘다. 팝업에서는 정한 키(기본 Q)로 바로 닫힌다.
+
+let popupWin = null;
+
+function openPopup(id) {
+  const start = Math.floor(playerTime || 0);
+  const width = Math.min(854, screen.availWidth - 40);
+  const height = Math.round(width * 9 / 16);
+  const win = window.open(`/popup.html?v=${encodeURIComponent(id)}&t=${start}`, 'sy_popup',
+    `popup,width=${width},height=${height},left=${screen.availWidth - width - 20},top=${screen.availHeight - height - 60}`);
+  if (!win) {
+    alert('팝업이 차단됐어요. 주소창 오른쪽의 팝업 차단 아이콘을 눌러 이 사이트의 팝업을 허용해 주세요.');
+    return;
+  }
+  popupWin = win;
+  playerCommand('pauseVideo');
+}
+
+function closePopup() {
+  if (popupWin && !popupWin.closed) popupWin.close();
+  popupWin = null;
+}
 
 // ---------- 가리기 (단축키: 한 번 누르면 빈 화면, 다시 누르면 원래 화면) ----------
 
@@ -682,6 +718,7 @@ function toggleCover() {
   if (cover.hidden) {
     resumeAfterCover = playerState === 1;
     playerCommand('pauseVideo');
+    closePopup();
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     closeMobileSearch();
     cover.hidden = false;
@@ -708,90 +745,55 @@ function quickExit() {
 
 document.getElementById('exitBtn').addEventListener('click', quickExit);
 
-// ---------- 가리기 단축키 (설정에서 바꿀 수 있고, 이 브라우저에 저장된다) ----------
-// 키는 e.code 로 비교해서 한/영 상태와 상관없이 같은 키로 동작한다.
+// ---------- 단축키 (가리기 / 팝업 닫기). 설정에서 바꿀 수 있고 이 브라우저에 저장된다 ----------
 
-const DEFAULT_SHORTCUT = { code: 'Backquote', ctrl: false, alt: false, shift: false, meta: false };
-const MODIFIER_CODES = /^(Control|Shift|Alt|Meta|OS)(Left|Right)?$|^(CapsLock|Fn|HangulMode|Hanja|Lang1|Lang2)$/;
-const CODE_NAMES = {
-  Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
-  Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Space: 'Space', Escape: 'Esc',
-  Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete', Insert: 'Insert',
-  Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
-  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', IntlBackslash: '\\'
-};
-
-let shortcut = loadShortcut();
-let recording = false;
-
-function loadShortcut() {
-  try {
-    const saved = localStorage.getItem('exitShortcut');
-    if (saved === 'off') return null;
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed && typeof parsed.code === 'string') return parsed;
-    }
-  } catch {}
-  return DEFAULT_SHORTCUT;
-}
-
-function saveShortcut(value) {
-  shortcut = value;
-  try { localStorage.setItem('exitShortcut', value ? JSON.stringify(value) : 'off'); } catch {}
-  updateShortcutLabels();
-}
-
-function keyName(code) {
-  if (CODE_NAMES[code]) return CODE_NAMES[code];
-  const m = code.match(/^(?:Key|Digit)(.)$/) || code.match(/^Numpad(.+)$/);
-  if (m) return code.startsWith('Numpad') ? `Num ${m[1]}` : m[1];
-  return code; // F1 등
-}
-
-function shortcutLabel(sc) {
-  if (!sc) return '없음';
-  return [sc.ctrl && 'Ctrl', sc.alt && 'Alt', sc.shift && 'Shift', sc.meta && 'Cmd', keyName(sc.code)].filter(Boolean).join(' + ');
-}
-
-function matchesShortcut(e, sc) {
-  return !!sc && e.code === sc.code && e.ctrlKey === !!sc.ctrl && e.altKey === !!sc.alt &&
-    e.shiftKey === !!sc.shift && e.metaKey === !!sc.meta;
-}
-
-// 글자/숫자/스페이스만 단독으로 정했다면, 검색창에 입력하는 중에는 나가지 않는다 (글자를 칠 수 있게).
-function isTypingKey(sc) {
-  return !sc.ctrl && !sc.alt && !sc.meta && /^(Key.|Digit.|Space|Numpad\d)$/.test(sc.code);
-}
-
-function isTypingTarget(target) {
-  return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
-}
+let coverShortcut = loadShortcut(COVER_SHORTCUT_KEY, DEFAULT_COVER_SHORTCUT);
+let popupShortcut = loadShortcut(POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT);
+let recordingFor = null; // 키를 기다리는 중인 설정 줄
 
 window.addEventListener('keydown', (e) => {
-  if (recording) return;
-  if (!matchesShortcut(e, shortcut)) return;
-  if (isTypingKey(shortcut) && isTypingTarget(e.target)) return;
+  if (recordingFor) return;
+  if (!matchesShortcut(e, coverShortcut)) return;
+  if (isTypingKey(coverShortcut) && isTypingTarget(e.target)) return;
   e.preventDefault();
   toggleCover();
 }, true);
 
-// ---------- 단축키 설정 창 ----------
+// ---------- 설정 창: 단축키 바꾸기 ----------
 
 const settingsDialog = document.getElementById('settingsDialog');
-const shortcutLabelEl = document.getElementById('shortcutLabel');
-const shortcutChangeBtn = document.getElementById('shortcutChange');
-const exitBtn = document.getElementById('exitBtn');
+
+const shortcutRows = {
+  cover: {
+    label: document.getElementById('shortcutLabel'),
+    change: document.getElementById('shortcutChange'),
+    get: () => coverShortcut,
+    set: (sc) => { coverShortcut = sc; storeShortcut(COVER_SHORTCUT_KEY, sc); },
+    fallback: DEFAULT_COVER_SHORTCUT,
+    reset: 'shortcutReset',
+    off: 'shortcutOff'
+  },
+  popup: {
+    label: document.getElementById('popupShortcutLabel'),
+    change: document.getElementById('popupShortcutChange'),
+    get: () => popupShortcut,
+    set: (sc) => { popupShortcut = sc; storeShortcut(POPUP_SHORTCUT_KEY, sc); },
+    fallback: DEFAULT_POPUP_SHORTCUT,
+    reset: 'popupShortcutReset',
+    off: 'popupShortcutOff'
+  }
+};
 
 function updateShortcutLabels() {
-  shortcutLabelEl.textContent = shortcutLabel(shortcut);
-  exitBtn.title = 'Google로 나가기';
+  for (const row of Object.values(shortcutRows)) row.label.textContent = shortcutLabel(row.get());
 }
 
 function stopRecording() {
-  recording = false;
-  shortcutChangeBtn.textContent = '바꾸기';
-  shortcutChangeBtn.classList.remove('recording');
+  if (!recordingFor) return;
+  const row = shortcutRows[recordingFor];
+  row.change.textContent = '바꾸기';
+  row.change.classList.remove('recording');
+  recordingFor = null;
   window.removeEventListener('keydown', recordKey, true);
 }
 
@@ -799,20 +801,25 @@ function recordKey(e) {
   if (MODIFIER_CODES.test(e.code) || !e.code) return; // Ctrl 같은 키만 누른 상태면 다음 키를 기다린다
   e.preventDefault();
   e.stopPropagation();
-  saveShortcut({ code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
+  shortcutRows[recordingFor].set(shortcutFromEvent(e));
   stopRecording();
+  updateShortcutLabels();
 }
 
-shortcutChangeBtn.addEventListener('click', () => {
-  if (recording) return stopRecording();
-  recording = true;
-  shortcutChangeBtn.textContent = '원하는 키를 누르세요…';
-  shortcutChangeBtn.classList.add('recording');
-  window.addEventListener('keydown', recordKey, true);
-});
+for (const [name, row] of Object.entries(shortcutRows)) {
+  row.change.addEventListener('click', () => {
+    const wasThis = recordingFor === name;
+    stopRecording();
+    if (wasThis) return;
+    recordingFor = name;
+    row.change.textContent = '원하는 키를 누르세요…';
+    row.change.classList.add('recording');
+    window.addEventListener('keydown', recordKey, true);
+  });
+  document.getElementById(row.reset).addEventListener('click', () => { stopRecording(); row.set(row.fallback); updateShortcutLabels(); });
+  document.getElementById(row.off).addEventListener('click', () => { stopRecording(); row.set(null); updateShortcutLabels(); });
+}
 
-document.getElementById('shortcutReset').addEventListener('click', () => { stopRecording(); saveShortcut(DEFAULT_SHORTCUT); });
-document.getElementById('shortcutOff').addEventListener('click', () => { stopRecording(); saveShortcut(null); });
 document.getElementById('settingsClose').addEventListener('click', () => settingsDialog.close());
 document.getElementById('settingsBtn').addEventListener('click', () => {
   updateShortcutLabels();
@@ -820,20 +827,12 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
 });
 
 // 키를 기다리는 중에 Esc 를 누르면 창이 닫히는 대신 Esc 가 단축키로 저장되게 한다.
-settingsDialog.addEventListener('cancel', (e) => { if (recording) e.preventDefault(); });
+settingsDialog.addEventListener('cancel', (e) => { if (recordingFor) e.preventDefault(); });
 settingsDialog.addEventListener('close', stopRecording);
 settingsDialog.addEventListener('click', (e) => { if (e.target === settingsDialog) settingsDialog.close(); });
 
 updateShortcutLabels();
 
-// 플레이어(iframe)를 클릭하면 키 입력이 플레이어로 가버려서 단축키가 안 먹힌다.
-// 클릭은 그대로 전달하고, 포커스만 바로 페이지로 되돌린다.
-const focusSink = el('div', { tabindex: '-1', 'aria-hidden': 'true', style: 'position:fixed;width:0;height:0;overflow:hidden' });
-document.body.append(focusSink);
-window.addEventListener('blur', () => {
-  setTimeout(() => {
-    if (document.activeElement?.tagName === 'IFRAME') focusSink.focus({ preventScroll: true });
-  }, 0);
-});
+const focusSink = keepKeyboardFocus();
 
 loadMe().then(route);
