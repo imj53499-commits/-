@@ -611,68 +611,156 @@ window.addEventListener('hashchange', route);
 
 // ---------- 로그인 / 가입 ----------
 
-function authCard(...children) {
-  return el('div', { class: 'auth' }, el('div', { class: 'auth-card' }, ...children));
+const ICONS = {
+  user: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+  id: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="12" r="2.2"/><path d="M14 10h4M14 14h3"/></svg>',
+  lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+  eye: '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.1 4M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.6 0 3-.4 4.3-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
+};
+
+function icon(name, cls = 'auth-icon') {
+  const span = el('span', { class: cls, 'aria-hidden': 'true' });
+  span.innerHTML = ICONS[name];
+  return span;
 }
 
-function field(label, input) {
-  return el('label', { class: 'field' }, el('span', { text: label }), input);
+// 로그인·가입·관리자 로그인 공통 카드: 로고, 제목, 한 줄 설명
+function authCard(title, subtitle, ...children) {
+  return el('div', { class: 'auth' },
+    el('div', { class: 'auth-card' },
+      el('div', { class: 'auth-head' },
+        el('span', { class: 'auth-logo', 'aria-hidden': 'true' }),
+        el('h1', { class: 'auth-title', text: title }),
+        subtitle ? el('p', { class: 'auth-subtitle', text: subtitle }) : null),
+      ...children));
 }
 
-function renderAuth(token, mode = 'login', notice = '') {
-  setTitle(mode === 'login' ? '로그인' : '가입하기');
+// 입력칸: 왼쪽 아이콘 + 입력 + (비밀번호면 보기 버튼) + 아래 안내 문구
+function field(label, input, iconName, { hint = '', check } = {}) {
+  const hintEl = el('span', { class: 'field-hint', text: hint });
+  const box = el('div', { class: 'field-box' }, icon(iconName), input);
+  if (input.type === 'password') {
+    const toggle = el('button', { type: 'button', class: 'field-eye', 'aria-label': '비밀번호 보기' });
+    toggle.innerHTML = ICONS.eye;
+    toggle.addEventListener('click', () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      toggle.innerHTML = show ? ICONS.eyeOff : ICONS.eye;
+      toggle.setAttribute('aria-label', show ? '비밀번호 숨기기' : '비밀번호 보기');
+      input.focus();
+    });
+    box.append(toggle);
+  }
+  const wrap = el('label', { class: 'field' }, el('span', { class: 'field-label', text: label }), box, hintEl);
+  if (check) {
+    // 입력하는 동안 형식이 맞는지 바로 보여 준다
+    const update = () => {
+      const value = input.value.trim();
+      const ok = check(value);
+      wrap.classList.toggle('valid', !!value && ok);
+      wrap.classList.toggle('invalid', !!value && !ok && document.activeElement !== input);
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('blur', update);
+  }
+  return wrap;
+}
+
+const RULES = {
+  name: (v) => /^[\p{L}\p{M}][\p{L}\p{M} .'-]{0,19}$/u.test(v),
+  username: (v) => /^[a-zA-Z0-9_가-힣]{2,20}$/.test(v),
+  password: (v) => v.length >= 6 && v.length <= 100
+};
+
+function renderAuth(token, mode = 'login', notice = '', prefill = '') {
+  setTitle();
   setActiveNav('');
-  const realName = el('input', { name: 'name', autocomplete: 'name', required: '', maxlength: '20' });
+  const signup = mode === 'signup';
+  const realName = el('input', { name: 'name', autocomplete: 'name', required: '', maxlength: '20', placeholder: '홍길동' });
   // 가입할 때는 브라우저가 저장된 이메일을 아이디 칸에 추천하지 않게 자동 완성을 끈다.
   const username = el('input', {
     name: 'username', required: '', maxlength: '20', autocapitalize: 'off', spellcheck: 'false',
-    autocomplete: mode === 'login' ? 'username' : 'off'
+    autocomplete: signup ? 'off' : 'username', placeholder: signup ? '사용할 아이디' : '아이디'
   });
+  username.value = prefill;
   const password = el('input', {
     name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
-    autocomplete: mode === 'login' ? 'current-password' : 'new-password'
+    autocomplete: signup ? 'new-password' : 'current-password', placeholder: signup ? '6자 이상' : '비밀번호'
   });
   const message = el('p', { class: `auth-message${notice ? ' ok' : ''}`, text: notice, role: 'alert' });
-  const submit = el('button', { class: 'auth-submit', type: 'submit', text: mode === 'login' ? '로그인' : '가입 신청' });
+  const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: signup ? '가입 신청하기' : '로그인' }));
   const tab = (key, label) => el('button', {
-    type: 'button', class: `auth-tab${mode === key ? ' active' : ''}`, text: label,
-    onclick: () => renderAuth(token, key)
+    type: 'button', class: `auth-tab${mode === key ? ' active' : ''}`, text: label, 'aria-pressed': String(mode === key),
+    onclick: () => { if (mode !== key) renderAuth(token, key, '', username.value.trim()); }
   });
 
-  const form = el('form', { class: 'auth-form' },
-    mode === 'signup' ? field('이름 (본인 실명)', realName) : null,
-    field('아이디', username),
-    field('비밀번호', password),
-    mode === 'signup' ? el('p', { class: 'auth-hint', text: '이메일은 필요 없어요. 아이디는 한글·영문·숫자 2~20자, 비밀번호는 6자 이상이에요. 가입하면 관리자가 승인한 뒤에 쓸 수 있어요.' }) : null,
+  const form = el('form', { class: 'auth-form', novalidate: '' },
+    signup ? field('이름', realName, 'user', { hint: '본인 실명 (관리자가 누군지 알 수 있게)', check: RULES.name }) : null,
+    field('아이디', username, 'id', signup ? { hint: '한글·영문·숫자·_ 2~20자', check: RULES.username } : {}),
+    field('비밀번호', password, 'lock', signup ? { hint: '6자 이상', check: RULES.password } : {}),
     message,
-    submit);
+    submit,
+    el('p', { class: 'auth-foot', text: signup ? '이메일은 필요 없어요 · 관리자가 승인하면 바로 쓸 수 있어요' : '처음이라면 위에서 가입하기를 눌러 주세요' }));
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    submit.disabled = true;
     message.className = 'auth-message';
     message.textContent = '';
+    const body = { username: username.value.trim(), password: password.value };
+    if (signup) body.name = realName.value.trim();
+    // 형식이 틀린 칸이 있으면 서버에 보내기 전에 알려 준다
+    if (signup) {
+      const wrong = [[realName, RULES.name, '이름을 확인해 주세요.'], [username, RULES.username, '아이디는 한글·영문·숫자·_ 2~20자예요.'], [password, RULES.password, '비밀번호는 6자 이상이에요.']]
+        .find(([input, rule]) => !rule(input === password ? input.value : input.value.trim()));
+      if (wrong) {
+        message.textContent = wrong[2];
+        wrong[0].closest('.field').classList.add('invalid');
+        wrong[0].focus();
+        return;
+      }
+    } else if (!body.username || !body.password) {
+      message.textContent = '아이디와 비밀번호를 입력해 주세요.';
+      (body.username ? password : username).focus();
+      return;
+    }
+    submit.disabled = true;
+    submit.classList.add('loading');
     try {
-      const body = { username: username.value.trim(), password: password.value };
-      if (mode === 'signup') body.name = realName.value.trim();
-      if (mode === 'signup') {
+      if (signup) {
         await api('/api/auth/signup', { method: 'POST', body });
-        renderAuth(token, 'login', '가입 신청이 완료됐어요! 관리자가 승인하면 로그인할 수 있어요.');
+        if (token !== renderToken) return;
+        renderSignupDone(token, body.name, body.username);
         return;
       }
       me = await api('/api/auth/login', { method: 'POST', body });
       route();
     } catch (err) {
       message.textContent = err.message;
+      message.className = err.code === 'PENDING' ? 'auth-message wait' : 'auth-message';
       submit.disabled = false;
+      submit.classList.remove('loading');
     }
   });
 
-  app.replaceChildren(authCard(
-    el('h1', { class: 'auth-title', text: 'School YouTube' }),
-    el('div', { class: 'auth-tabs' }, tab('login', '로그인'), tab('signup', '가입하기')),
+  app.replaceChildren(authCard('School YouTube', signup ? '가입 신청을 하면 관리자가 확인해요' : '다시 오신 걸 환영해요',
+    el('div', { class: `auth-tabs${signup ? ' signup' : ''}` }, tab('login', '로그인'), tab('signup', '가입하기')),
     form));
-  (mode === 'signup' ? realName : username).focus();
+  (signup ? realName : (prefill ? password : username)).focus();
+}
+
+// 가입 신청을 마친 뒤 보여 주는 화면
+function renderSignupDone(token, name, username) {
+  const badge = icon('check', 'auth-done-badge');
+  app.replaceChildren(authCard('가입 신청 완료!', '',
+    el('div', { class: 'auth-done' },
+      badge,
+      el('p', { class: 'auth-done-text', text: `${name}님, 신청이 들어갔어요.` }),
+      el('p', { class: 'auth-done-sub', text: '관리자가 승인하면 아이디와 비밀번호로 로그인할 수 있어요.' }),
+      el('div', { class: 'auth-done-id' }, el('span', { text: '아이디' }), el('strong', { text: username })),
+      el('button', { class: 'auth-submit', type: 'button', onclick: () => renderAuth(token, 'login', '', username) },
+        el('span', { text: '로그인 화면으로' })))));
 }
 
 // ---------- 관리자: 가입 승인 ----------
@@ -685,10 +773,10 @@ async function renderAdmin(token) {
   document.body.classList.toggle('auth-mode', !me);
 
   if (me?.role !== 'admin') {
-    const password = el('input', { type: 'password', autocomplete: 'current-password', required: '' });
+    const password = el('input', { type: 'password', autocomplete: 'current-password', required: '', placeholder: '관리자 비밀번호' });
     const message = el('p', { class: 'auth-message', role: 'alert' });
-    const submit = el('button', { class: 'auth-submit', type: 'submit', text: '관리자 로그인' });
-    const form = el('form', { class: 'auth-form' }, field('관리자 비밀번호', password), message, submit);
+    const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: '관리자 로그인' }));
+    const form = el('form', { class: 'auth-form' }, field('비밀번호', password, 'lock'), message, submit);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       submit.disabled = true;
@@ -700,7 +788,7 @@ async function renderAdmin(token) {
         submit.disabled = false;
       }
     });
-    app.replaceChildren(authCard(el('h1', { class: 'auth-title', text: '관리자' }), form));
+    app.replaceChildren(authCard('관리자', '가입 신청을 승인하려면 로그인하세요', form));
     password.focus();
     return;
   }
