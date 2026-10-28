@@ -3,6 +3,10 @@ import {
   loadShortcut, storeShortcut, shortcutFromEvent, shortcutLabel, matchesShortcut, isTypingKey, isTypingTarget,
   keepKeyboardFocus
 } from './shortcuts.js';
+import {
+  embedUrl, sendToPlayer, listenTo, readPlayerMessage, autostart, loadAutoplay, saveAutoplay,
+  loadHistory, recordWatch, clearHistory, pickNext, ENDED, PAUSED
+} from './player.js';
 
 const app = document.getElementById('app');
 const cardTpl = document.getElementById('cardTpl');
@@ -185,29 +189,6 @@ function mixFeed(recs, popular) {
   return out;
 }
 
-// ---------- 시청 기록 (이 브라우저에만 저장, 추천에 사용) ----------
-
-const HISTORY_KEY = 'watchHistory';
-const HISTORY_MAX = 50;
-
-function loadHistory() {
-  try {
-    const list = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    return Array.isArray(list) ? list.filter((h) => /^[\w-]{11}$/.test(h?.id || '')) : [];
-  } catch {
-    return [];
-  }
-}
-
-function recordWatch(id) {
-  const list = [{ id, at: Date.now() }, ...loadHistory().filter((h) => h.id !== id)].slice(0, HISTORY_MAX);
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch {}
-}
-
-function clearHistory() {
-  try { localStorage.removeItem(HISTORY_KEY); } catch {}
-}
-
 async function renderSearch(q, token) {
   setTitle(q);
   setActiveNav('');
@@ -242,7 +223,7 @@ async function renderWatch(id, token) {
   setActiveNav('');
   const player = el('div', { class: 'player' },
     el('iframe', {
-      src: `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`,
+      src: embedUrl(id),
       title: '동영상 플레이어',
       onload: (e) => listenToPlayer(e.target),
       allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
@@ -283,8 +264,20 @@ async function renderWatch(id, token) {
 
     const popupBtn = el('button', { class: 'popup-btn', type: 'button', onclick: () => openPopup(id) },
       el('span', { text: '팝업으로 보기' }));
+    const autoplayBox = el('input', { type: 'checkbox', role: 'switch' });
+    autoplayBox.checked = loadAutoplay();
+    autoplayBox.addEventListener('change', () => saveAutoplay(autoplayBox.checked));
+    const autoplay = el('label', { class: 'autoplay-toggle', title: '영상이 끝나면 다음 영상을 자동으로 재생' },
+      autoplayBox, el('span', { text: '자동재생' }));
     info.replaceChildren(el('h1', { class: 'watch-title', text: v.title }),
-      el('div', { class: 'watch-actions' }, owner, popupBtn), desc);
+      el('div', { class: 'watch-actions' }, owner, el('div', { class: 'watch-buttons' }, autoplay, popupBtn)), desc);
+
+    // 영상이 끝나면 관련 영상 중 안 본 영상으로 넘어간다 (자동재생이 켜져 있고 화면을 가리지 않았을 때)
+    onPlayerEnded = () => {
+      if (!loadAutoplay() || !cover.hidden) return;
+      const next = pickNext(v.related, id);
+      if (next) location.hash = `#/watch/${next.id}`;
+    };
     related.replaceChildren(...v.related.map(videoCard));
   } catch (err) {
     if (token !== renderToken) return;
@@ -320,7 +313,7 @@ async function renderChannel(id, token) {
 
 function shortPlayer(id) {
   return el('iframe', {
-    src: `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1&loop=1&playlist=${id}&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`,
+    src: embedUrl(id, `&loop=1&playlist=${id}`),
     title: '쇼츠 플레이어',
     allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
     allowfullscreen: '',
@@ -411,6 +404,7 @@ function route() {
   const hash = location.hash.replace(/^#/, '') || '/';
   const [path, query = ''] = hash.split('?');
   const parts = path.split('/').filter(Boolean);
+  onPlayerEnded = null;
   closeMobileSearch();
   updateAccountUI();
   document.body.classList.remove('shorts-mode');
@@ -726,24 +720,29 @@ document.getElementById('themeBtn').addEventListener('click', () => {
 
 let playerState = -1;
 let playerTime = 0;
+let onPlayerEnded = null; // 지금 화면에서 영상이 끝났을 때 할 일 (시청 화면의 다음 영상 자동재생)
 
 function listenToPlayer(iframe) {
   playerState = -1;
   playerTime = 0;
-  iframe.contentWindow?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
+  listenTo(iframe);
+  // 자동재생이 막혔으면 음소거로 시작한다. 화면을 가린 중에는 건드리지 않는다.
+  autostart(iframe, () => (cover.hidden ? playerState : PAUSED), iframe.parentElement);
 }
 
 function playerCommand(func) {
-  const iframe = document.querySelector('iframe[data-player]');
-  iframe?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*');
+  sendToPlayer(document.querySelector('iframe[data-player]'), func);
 }
 
 window.addEventListener('message', (e) => {
-  if (!/^https:\/\/www\.youtube(-nocookie)?\.com$/.test(e.origin)) return;
-  let data;
-  try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
-  if (typeof data?.info?.playerState === 'number') playerState = data.info.playerState;
-  if (typeof data?.info?.currentTime === 'number') playerTime = data.info.currentTime;
+  const msg = readPlayerMessage(e);
+  if (!msg) return;
+  if (msg.state !== undefined) {
+    const ended = msg.state === ENDED && playerState !== ENDED;
+    playerState = msg.state;
+    if (ended) onPlayerEnded?.();
+  }
+  if (msg.time !== undefined) playerTime = msg.time;
 });
 
 // ---------- 팝업으로 보기 (롱폼) ----------
