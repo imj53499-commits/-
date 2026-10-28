@@ -1,17 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "worker",
-  "workers_dev": true,
-  "main": "src/worker.js",
-  "compatibility_date": "2025-10-01",
-  "assets": {
-    "directory": "./public",
-    "binding": "ASSETS",
-    // 새로고침해도 화면이 뜨도록 없는 경로는 index.html 로 보낸다.
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
-  },
-  "observability": {
-    "enabled": true
-  }
+  // Cloudflare Pages 설정. 대시보드의 빌드 설정보다 이 파일이 우선한다.
+  "name": "schoolyoutube",
+  "pages_build_output_dir": "./public",
+  "compatibility_date": "2025-10-01"
 }
