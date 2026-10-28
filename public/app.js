@@ -111,6 +111,18 @@ function videoCard(v) {
     if (!avatar.hidden) avatar.addEventListener('click', goChannel);
   }
   card.querySelector('.card-meta').textContent = v.meta || '';
+
+  if (!v.isShort) {
+    const popup = el('span', { class: 'card-popup', role: 'button', title: '팝업으로 보기', 'aria-label': '팝업으로 보기' });
+    popup.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/></svg>';
+    popup.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      recordWatch(v.id);
+      openPopup(v.id, 0);
+    });
+    card.querySelector('.thumb').append(popup);
+  }
   return card;
 }
 
@@ -137,14 +149,63 @@ async function renderHome(category, token) {
   const body = el('div', {}, skeletonGrid());
   app.replaceChildren(chips, body);
 
-  try {
-    const items = await api(`/api/home?category=${encodeURIComponent(category)}`);
-    if (token !== renderToken) return;
-    body.replaceChildren(items.length ? videoGrid(items) : errorView('표시할 영상이 없어요.'));
-  } catch (err) {
-    if (token !== renderToken) return;
-    body.replaceChildren(errorView(err.message, () => route()));
+  // 전체 탭에서는 최근 본 영상의 관련 영상(추천)과 인기 영상을 섞어서 보여 준다.
+  const history = category === 'all' ? loadHistory() : [];
+  const seeds = history.slice(0, 2).map((h) => h.id).join(',');
+  const [homeRes, recRes] = await Promise.allSettled([
+    api(`/api/home?category=${encodeURIComponent(category)}`),
+    seeds ? api(`/api/recommend?ids=${seeds}`) : Promise.resolve([])
+  ]);
+  if (token !== renderToken) return;
+  if (homeRes.status === 'rejected' && !(recRes.value?.length)) {
+    body.replaceChildren(errorView(homeRes.reason.message, () => route()));
+    return;
   }
+  const watched = new Set(history.map((h) => h.id));
+  const fresh = (list) => (list || []).filter((v) => !watched.has(v.id));
+  const recs = fresh(recRes.value);
+  const items = mixFeed(recs, fresh(homeRes.value));
+  body.replaceChildren(
+    recs.length ? el('p', { class: 'feed-note', text: '최근 본 영상을 바탕으로 골랐어요' }) : '',
+    items.length ? videoGrid(items) : errorView('표시할 영상이 없어요.'));
+}
+
+// 추천 2개, 인기 1개 순서로 섞는다. 같은 영상은 한 번만.
+function mixFeed(recs, popular) {
+  const out = [];
+  const seen = new Set();
+  const add = (v) => { if (v && !seen.has(v.id)) { seen.add(v.id); out.push(v); } };
+  let r = 0;
+  let p = 0;
+  while (r < recs.length || p < popular.length) {
+    add(recs[r++]);
+    add(recs[r++]);
+    add(popular[p++]);
+  }
+  return out;
+}
+
+// ---------- 시청 기록 (이 브라우저에만 저장, 추천에 사용) ----------
+
+const HISTORY_KEY = 'watchHistory';
+const HISTORY_MAX = 50;
+
+function loadHistory() {
+  try {
+    const list = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    return Array.isArray(list) ? list.filter((h) => /^[\w-]{11}$/.test(h?.id || '')) : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordWatch(id) {
+  const list = [{ id, at: Date.now() }, ...loadHistory().filter((h) => h.id !== id)].slice(0, HISTORY_MAX);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch {}
+}
+
+function clearHistory() {
+  try { localStorage.removeItem(HISTORY_KEY); } catch {}
 }
 
 async function renderSearch(q, token) {
@@ -205,6 +266,7 @@ async function renderWatch(id, token) {
     const v = await api(`/api/video?id=${encodeURIComponent(id)}`);
     if (token !== renderToken) return;
     setTitle(v.title);
+    recordWatch(id);
 
     const owner = el('a', { class: 'owner', href: v.channelId ? `#/channel/${v.channelId}` : '#' },
       safeImg(v.channelAvatar) ? el('img', { src: v.channelAvatar, alt: '' }) : null,
@@ -689,8 +751,7 @@ window.addEventListener('message', (e) => {
 
 let popupWin = null;
 
-function openPopup(id) {
-  const start = Math.floor(playerTime || 0);
+function openPopup(id, start = Math.floor(playerTime || 0)) {
   const width = Math.min(854, screen.availWidth - 40);
   const height = Math.round(width * 9 / 16);
   const win = window.open(`/popup.html?v=${encodeURIComponent(id)}&t=${start}`, 'sy_popup',
@@ -821,8 +882,18 @@ for (const [name, row] of Object.entries(shortcutRows)) {
 }
 
 document.getElementById('settingsClose').addEventListener('click', () => settingsDialog.close());
+function updateHistoryInfo() {
+  document.getElementById('historyCount').textContent = `${loadHistory().length}개`;
+}
+
+document.getElementById('clearHistoryBtn').addEventListener('click', () => {
+  clearHistory();
+  updateHistoryInfo();
+});
+
 document.getElementById('settingsBtn').addEventListener('click', () => {
   updateShortcutLabels();
+  updateHistoryInfo();
   settingsDialog.showModal();
 });
 

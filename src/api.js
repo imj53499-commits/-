@@ -18,6 +18,9 @@ export const SHORTS_QUERIES = [
   ['#shorts 먹방', '#shorts 스포츠'], ['#shorts 댄스', '#shorts 꿀팁']
 ];
 
+// 추천에 쓰는 최근 시청 영상 수. 영상마다 YouTube 요청이 하나씩 들어서 무료 플랜 CPU 제한을 생각해 작게 둔다.
+const RECOMMEND_SEEDS = 2;
+
 const CACHE_TTL = 5 * 60 * 1000;
 const cache = new Map();
 
@@ -110,6 +113,15 @@ export async function handleApi(url, yt) {
         const id = q('id', 20);
         if (!VIDEO_ID.test(id)) return json({ error: '잘못된 영상 ID' }, 400);
         return json(await cached(`video:${id}`, () => yt.video(id)));
+      }
+      // 최근 본 영상(최대 RECOMMEND_SEEDS 개)의 관련 영상을 섞어서 추천한다. 시청 기록은 브라우저에만 있고 서버에 저장하지 않는다.
+      case '/api/recommend': {
+        const ids = [...new Set(q('ids', 100).split(','))].filter((id) => VIDEO_ID.test(id)).slice(0, RECOMMEND_SEEDS);
+        if (!ids.length) return json([]);
+        const settled = await Promise.allSettled(ids.map((id) => cached(`video:${id}`, () => yt.video(id))));
+        const lists = settled.filter((s) => s.status === 'fulfilled').map((s) => s.value.related);
+        if (!lists.length) throw settled[0].reason;
+        return json(interleave(lists, 40).filter((v) => !ids.includes(v.id)));
       }
       case '/api/channel': {
         const id = q('id', 30);

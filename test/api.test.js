@@ -207,3 +207,12 @@ test('extractVideos 는 중복을 빼고 순서를 지킨다', () => {
   const items = extractVideos([videoRenderer('aaaaaaaaaaa', '1'), { x: [videoRenderer('bbbbbbbbbbb', '2')] }, videoRenderer('aaaaaaaaaaa', '1')]);
   assert.deepEqual(items.map((v) => v.id), ['aaaaaaaaaaa', 'bbbbbbbbbbb']);
 });
+
+test('추천: 최근 본 영상들의 관련 영상을 섞고, 본 영상은 뺀다', async () => {
+  const res = await get('/api/recommend?ids=dQw4w9WgXcQ,aaaaaaaaaaa,bbbbbbbbbbb,bad');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.map((v) => v.id), ['rel00000001']);
+  assert.equal(calls.filter((c) => c.includes('/next')).length, 2); // 최대 2개 영상만 본다
+  assert.deepEqual((await get('/api/recommend?ids=')).body, []);
+  assert.deepEqual((await get('/api/recommend?ids=bad')).body, []);
+});

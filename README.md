@@ -3,10 +3,11 @@
 관리자가 승인한 사람만 들어와서 볼 수 있는 YouTube 뷰어입니다. Cloudflare Pages 무료 플랜에서 돌아갑니다.
 
 - 홈: 들어가면 바로 인기/추천 영상 목록 (카테고리: 음악, 게임, 뉴스, 스포츠 …)
+- 추천: 최근 본 영상 2개의 관련 영상을 홈(전체)에 인기 영상과 섞어서 보여 줌. 본 영상은 다시 안 나옴. 시청 기록은 브라우저에만 저장 (⚙에서 지우기)
 - Shorts: 세로로 한 개씩 넘겨 보기 (휴대폰은 위아래로 밀기, 컴퓨터는 휠이나 ↑↓ 키), 끝까지 가면 자동으로 더 불러옴
 - 검색 + 자동완성
 - 영상 재생 (YouTube 공식 임베드 플레이어), 설명, 관련 영상
-- 팝업으로 보기 (컴퓨터): 영상 화면의 버튼으로 작은 창에서 이어 보기. 팝업에서 단축키(기본 `Q`, ⚙에서 변경)를 누르면 바로 닫힘. 가리기 단축키를 누르면 팝업도 같이 닫힘
+- 팝업으로 보기 (컴퓨터): 영상 화면의 버튼이나 목록 썸네일 위 팝업 아이콘으로 작은 창에서 보기. 팝업에서 단축키(기본 `Q`, ⚙에서 변경)를 누르면 바로 닫힘. 가리기 단축키를 누르면 팝업도 같이 닫힘
 - 채널 페이지
 - 다크 모드, 모바일 화면 지원
 - 브라우저 탭·방문 기록에는 항상 "새 탭" 이라는 제목과 회색 아이콘만 표시 (`public/app.js` 의 `PAGE_TITLE`)
@@ -61,7 +62,7 @@ npm test
 | `functions/api/[[path]].js` | Pages 진입점 (`/api/*`) |
 | `src/server.js` | `/api/*` 입구: 로그인 확인 후 영상 API 로 전달 |
 | `src/auth.js` | 가입, 로그인, 세션, 관리자 승인 (KV 저장) |
-| `src/api.js` | API 라우트 (`/api/home`, `/api/shorts`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
+| `src/api.js` | API 라우트 (`/api/home`, `/api/recommend`, `/api/shorts`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
 | `src/youtube.js` | YouTube 내부 API 호출과 응답에서 영상 정보 추출 |
 | `public/` | 화면 (HTML/CSS/JS, 빌드 불필요). `popup.html`/`popup.js` 는 팝업 플레이어, `shortcuts.js` 는 단축키 공통 코드 |
 | `wrangler.jsonc` | Cloudflare Pages 설정 (출력 폴더 `public`) |
