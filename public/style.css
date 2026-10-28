@@ -382,7 +382,7 @@ body.shorts-mode .content { padding-bottom: 0; }
   .watch > div:first-child { display: contents; }
   .player { position: sticky; top: var(--topbar-h); z-index: 12; border-radius: 0; }
   .watch-title { font-size: 17px; margin: 12px 12px 10px; }
-  .owner { padding: 0 12px; }
+  .watch-actions { padding: 0 12px; }
   .owner img { width: 34px; height: 34px; }
   .owner-name { font-size: 14px; }
   .description { margin: 12px 12px 0; max-height: 96px; font-size: 13px; }
