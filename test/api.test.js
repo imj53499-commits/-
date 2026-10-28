@@ -43,6 +43,33 @@ const lockup = (id, title, contentType = 'LOCKUP_CONTENT_TYPE_VIDEO') => ({
   }
 });
 
+// 댓글 응답: 첫 페이지는 예전 형식 + 새 형식이 섞여 있고, 답글 토큰과 다음 페이지 토큰이 같이 있다.
+function commentsResponse(token) {
+  if (token === 'TOKEN_comments_2') {
+    return { onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { continuationItems: [
+      { commentThreadRenderer: { comment: { commentRenderer: { commentId: 'c3', authorText: { simpleText: '@셋째' }, contentText: { runs: [{ text: '마지막 댓글' }] }, publishedTimeText: { runs: [{ text: '3일 전' }] } } } } }
+    ] } }] };
+  }
+  return {
+    onResponseReceivedEndpoints: [
+      { reloadContinuationItemsCommand: { continuationItems: [{ commentsHeaderRenderer: { countText: { runs: [{ text: '댓글 ' }, { text: '1,234' }, { text: '개' }] } } }] } },
+      { reloadContinuationItemsCommand: { continuationItems: [
+        { commentThreadRenderer: {
+          comment: { commentRenderer: { commentId: 'c1', authorText: { simpleText: '@첫째' }, authorThumbnail: { thumbnails: [{ url: 'https://yt3.ggpht.com/u1.jpg' }] }, contentText: { runs: [{ text: '좋은 영상 ' }, { text: '감사합니다' }] }, publishedTimeText: { runs: [{ text: '1일 전' }] }, voteCount: { simpleText: '12' }, replyCount: 3 } },
+          replies: { commentRepliesRenderer: { contents: [{ continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'TOKEN_replies_c1' } } } }] } }
+        } },
+        { commentThreadRenderer: { commentViewModel: { commentViewModel: { commentKey: 'key-c2' } } } },
+        { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'TOKEN_comments_2' } } } }
+      ] } }
+    ],
+    frameworkUpdates: { entityBatchUpdate: { mutations: [{ entityKey: 'key-c2', payload: { commentEntityPayload: {
+      properties: { commentId: 'c2', content: { content: '새 형식 댓글' }, publishedTime: '2시간 전' },
+      author: { displayName: '@둘째', avatarThumbnailUrl: '//yt3.ggpht.com/u2.jpg' },
+      toolbar: { likeCountNotliked: '5', replyCount: '0' }
+    } } }] } }
+  };
+}
+
 const responses = {
   search: (body) => body.continuation ? {
     onResponseReceivedCommands: [{ appendContinuationItemsAction: { continuationItems: [
@@ -83,7 +110,7 @@ const responses = {
         header: { pageHeaderRenderer: { content: { pageHeaderViewModel: { banner: { imageBannerViewModel: { image: { sources: [{ url: 'https://yt3.ggpht.com/s.jpg' }, { url: 'https://yt3.ggpht.com/l.jpg' }] } } } } } } },
         contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { content: { richGridRenderer: { contents: [{ richItemRenderer: { content: videoRenderer('chv00000001', '채널 영상') } }] } } } }] } }
       },
-  next: (body) => ({
+  next: (body) => body.continuation ? commentsResponse(body.continuation) : ({
     contents: {
       twoColumnWatchNextResults: {
         results: {
@@ -93,7 +120,10 @@ const responses = {
               { videoSecondaryInfoRenderer: {
                 owner: { videoOwnerRenderer: { title: { runs: [{ text: '테스트 채널', navigationEndpoint: { browseEndpoint: { browseId: 'UCaaaaaaaaaaaaaaaaaaaaaa' } } }] }, thumbnail: { thumbnails: [{ url: 'https://yt3.ggpht.com/a.jpg' }] }, subscriberCountText: { simpleText: '구독자 10만명' } } },
                 attributedDescription: { content: '설명 https://example.com' }
-              } }
+              } },
+              { itemSectionRenderer: { sectionIdentifier: 'comment-item-section', contents: [
+                { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'TOKEN_comments_1' } } } }
+              ] } }
             ]
           }
         },
@@ -258,4 +288,18 @@ test('홈: 페이지를 넘기면 다른 검색을 한다', async () => {
   await get('/api/home?category=music&page=1&seed=7');
   assert.equal(calls.filter((c) => c.includes('/search')).length, first + 2);
   assert.equal((await get('/api/home?category=music&page=999&seed=7')).status, 200);
+});
+
+test('댓글: 두 형식을 모두 읽고, 다음 페이지로 이어진다', async () => {
+  const first = await get('/api/comments?id=dQw4w9WgXcQ');
+  assert.equal(first.status, 200);
+  assert.equal(first.body.count, '댓글 1,234개');
+  assert.deepEqual(first.body.items.map((c) => [c.author, c.text, c.likes]), [['@첫째', '좋은 영상 감사합니다', '12'], ['@둘째', '새 형식 댓글', '5']]);
+  assert.equal(first.body.items[0].replies, '3');
+  assert.equal(first.body.items[1].avatar, 'https://yt3.ggpht.com/u2.jpg');
+  assert.equal(first.body.next, 'TOKEN_comments_2'); // 답글 토큰이 아니라 다음 페이지 토큰
+  const more = await get('/api/comments?cont=TOKEN_comments_2');
+  assert.deepEqual(more.body.items.map((c) => c.text), ['마지막 댓글']);
+  assert.equal(more.body.next, null);
+  assert.equal((await get('/api/comments?id=bad')).status, 400);
 });

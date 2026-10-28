@@ -35,6 +35,7 @@ export function readPlayerMessage(e) {
   if (data.event === 'onStateChange' && typeof data.info === 'number') out.state = data.info;
   if (typeof data.info?.playerState === 'number') out.state = data.info.playerState;
   if (typeof data.info?.currentTime === 'number') out.time = data.info.currentTime;
+  if (typeof data.info?.duration === 'number' && data.info.duration > 0) out.duration = data.info.duration;
   return out;
 }
 
@@ -116,4 +117,103 @@ export function loadPopupBounds() {
 
 export function savePopupBounds(bounds) {
   try { localStorage.setItem(POPUP_BOUNDS_KEY, JSON.stringify(bounds)); } catch {}
+}
+
+// ---------- 이어보기: 영상마다 본 위치 (최근 100개, 이 브라우저에만 저장) ----------
+
+const PROGRESS_KEY = 'watchProgress';
+const PROGRESS_MAX = 100;
+const MIN_RESUME = 10; // 10초도 안 봤으면 이어보기로 치지 않는다
+let progressCache = null;
+
+function readProgress() {
+  if (progressCache) return progressCache;
+  try {
+    const all = JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}');
+    progressCache = all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch {
+    progressCache = {};
+  }
+  return progressCache;
+}
+
+function writeProgress(all) {
+  const ids = Object.keys(all).sort((a, b) => (all[b].at || 0) - (all[a].at || 0));
+  for (const id of ids.slice(PROGRESS_MAX)) delete all[id];
+  progressCache = all;
+  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(all)); } catch {}
+}
+
+// 거의 다 봤으면(95% 이상 또는 20초도 안 남음) 끝까지 본 것으로 친다.
+export function isFinished(time, duration) {
+  return duration > 0 && (time >= duration * 0.95 || duration - time < 20);
+}
+
+// 다시 열 때 시작할 위치 (초). 없으면 0.
+export function resumeTime(id) {
+  const p = readProgress()[id];
+  return p && p.t >= MIN_RESUME && !isFinished(p.t, p.d) ? p.t : 0;
+}
+
+// 썸네일 진행 막대용 (0~1). 없으면 0.
+export function progressFraction(id) {
+  const p = readProgress()[id];
+  return p && p.d > 0 && p.t >= MIN_RESUME ? Math.min(p.t / p.d, 1) : 0;
+}
+
+// meta: { title, channel } (있으면 함께 저장해서 홈의 '이어서 보기' 목록에 쓴다)
+export function saveProgress(id, time, duration, meta) {
+  if (!/^[\w-]{11}$/.test(id) || !(time >= 0)) return;
+  const all = { ...readProgress() };
+  const prev = all[id] || {};
+  const d = duration > 0 ? Math.floor(duration) : prev.d || 0;
+  if (isFinished(time, d)) {
+    delete all[id];
+  } else if (time >= MIN_RESUME) {
+    all[id] = { ...prev, ...cleanMeta(meta), t: Math.floor(time), d, at: Date.now() };
+  } else if (meta && prev.t) {
+    all[id] = { ...prev, ...cleanMeta(meta) };
+  } else {
+    return;
+  }
+  writeProgress(all);
+}
+
+export function forgetProgress(id) {
+  const all = { ...readProgress() };
+  if (!all[id]) return;
+  delete all[id];
+  writeProgress(all);
+}
+
+function cleanMeta(meta) {
+  const out = {};
+  if (meta?.title) out.title = String(meta.title).slice(0, 200);
+  if (meta?.channel) out.channel = String(meta.channel).slice(0, 100);
+  return out;
+}
+
+// 홈 '이어서 보기' 목록: 제목을 아는 것만, 최근에 본 순서로
+export function continueWatching(limit = 12) {
+  return Object.entries(readProgress())
+    .filter(([, p]) => p.title && p.t >= MIN_RESUME && p.d > 0 && !isFinished(p.t, p.d))
+    .sort(([, a], [, b]) => (b.at || 0) - (a.at || 0))
+    .slice(0, limit)
+    .map(([id, p]) => ({ id, ...p }));
+}
+
+export function clearProgress() {
+  progressCache = {};
+  try { localStorage.removeItem(PROGRESS_KEY); } catch {}
+}
+
+// 다른 탭(팝업)에서 바뀌면 다시 읽는다.
+window.addEventListener('storage', (e) => { if (e.key === PROGRESS_KEY) progressCache = null; });
+
+export function formatTime(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }

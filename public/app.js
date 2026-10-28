@@ -7,6 +7,9 @@ import {
   embedUrl, sendToPlayer, listenTo, readPlayerMessage, autostart, loadAutoplay, saveAutoplay,
   loadHistory, recordWatch, clearHistory, pickNext, loadPopupBounds, ENDED, PAUSED
 } from './player.js';
+import {
+  resumeTime, progressFraction, saveProgress, forgetProgress, continueWatching, clearProgress, formatTime
+} from './player.js';
 import { PRESETS, loadDisguise, saveDisguise, applyDisguise, cleanDomain, iconFor, isDisguiseKey } from './disguise.js';
 
 const app = document.getElementById('app');
@@ -115,6 +118,13 @@ function videoCard(v) {
   }
   card.querySelector('.card-meta').textContent = v.meta || '';
 
+  const watched = v.isShort ? 0 : progressFraction(v.id);
+  if (watched) {
+    const bar = el('div', { class: 'card-progress' }, el('div'));
+    bar.firstChild.style.width = `${Math.round(watched * 100)}%`;
+    card.querySelector('.thumb').append(bar);
+  }
+
   if (!v.isShort) {
     const popup = el('span', { class: 'card-popup', role: 'button', title: '팝업으로 보기', 'aria-label': '팝업으로 보기' });
     popup.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/></svg>';
@@ -122,7 +132,8 @@ function videoCard(v) {
       e.preventDefault();
       e.stopPropagation();
       recordWatch(v.id);
-      openPopup(v.id, 0);
+      saveProgress(v.id, 0, 0, { title: v.title, channel: v.channel });
+      openPopup(v.id, resumeTime(v.id));
     });
     card.querySelector('.thumb').append(popup);
   }
@@ -199,7 +210,8 @@ async function renderHome(category, token) {
     for (const v of items) seen.add(v.id);
 
     if (p === 0) {
-      body.replaceChildren(recs.length ? el('p', { class: 'feed-note', text: '최근 본 영상을 바탕으로 골랐어요' }) : '', grid, status);
+      body.replaceChildren(category === 'all' ? continueRow() ?? '' : '',
+        recs.length ? el('p', { class: 'feed-note', text: '최근 본 영상을 바탕으로 골랐어요' }) : '', grid, status);
       observer.observe(status);
     }
     grid.append(...items.map(videoCard));
@@ -333,9 +345,12 @@ function linkify(text) {
 
 async function renderWatch(id, token) {
   setActiveNav('');
+  // 전에 보던 위치가 있으면 거기서부터 시작한다
+  const resumeAt = resumeTime(id);
+  watching = { id, meta: null };
   const player = el('div', { class: 'player' },
     el('iframe', {
-      src: embedUrl(id),
+      src: embedUrl(id, resumeAt ? `&start=${resumeAt}` : ''),
       title: '동영상 플레이어',
       onload: (e) => listenToPlayer(e.target),
       allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
@@ -350,8 +365,16 @@ async function renderWatch(id, token) {
     el('div', { class: 'card skeleton' }, el('div', { class: 'thumb' }),
       el('div', { class: 'card-text', style: 'flex:1' }, el('div', { class: 'line' }), el('div', { class: 'line', style: 'width:60%' })))));
 
+  const resumeBar = resumeAt ? el('div', { class: 'resume-bar' },
+    el('span', { text: `${formatTime(resumeAt)}부터 이어서 재생 중` }),
+    el('button', { type: 'button', text: '처음부터', onclick: () => {
+      sendToPlayer(player.querySelector('iframe'), 'seekTo', [0, true]);
+      forgetProgress(id);
+      resumeBar.remove();
+    } })) : null;
+
   app.replaceChildren(el('div', { class: 'watch' },
-    el('div', {}, player, info),
+    el('div', {}, player, resumeBar, info),
     el('aside', {}, related)));
   window.scrollTo({ top: 0 });
 
@@ -360,6 +383,7 @@ async function renderWatch(id, token) {
     if (token !== renderToken) return;
     setTitle(v.title);
     recordWatch(id);
+    if (watching?.id === id) watching.meta = { title: v.title, channel: v.channel };
 
     const owner = el('a', { class: 'owner', href: v.channelId ? `#/channel/${v.channelId}` : '#' },
       safeImg(v.channelAvatar) ? el('img', { src: v.channelAvatar, alt: '' }) : null,
@@ -382,7 +406,8 @@ async function renderWatch(id, token) {
     const autoplay = el('label', { class: 'autoplay-toggle', title: '영상이 끝나면 다음 영상을 자동으로 재생' },
       autoplayBox, el('span', { text: '자동재생' }));
     info.replaceChildren(el('h1', { class: 'watch-title', text: v.title }),
-      el('div', { class: 'watch-actions' }, owner, el('div', { class: 'watch-buttons' }, autoplay, popupBtn)), desc);
+      el('div', { class: 'watch-actions' }, owner, el('div', { class: 'watch-buttons' }, autoplay, popupBtn)), desc,
+      commentsSection(id, token));
 
     // 영상이 끝나면 관련 영상 중 안 본 영상으로 넘어간다 (자동재생이 켜져 있고 화면을 가리지 않았을 때)
     onPlayerEnded = () => {
@@ -396,6 +421,92 @@ async function renderWatch(id, token) {
     info.replaceChildren(el('div', { class: 'message', style: 'padding:24px', text: err.message }));
     related.replaceChildren();
   }
+}
+
+// ---------- 댓글 ----------
+// 화면에 보이면 그때 불러오고, 아래로 내리면 계속 더 불러온다.
+
+function commentsSection(id, token) {
+  const title = el('h2', { class: 'comments-title', text: '댓글' });
+  const list = el('div', { class: 'comment-list' });
+  const status = el('div', { class: 'feed-status' }, el('div', { class: 'feed-loading', text: '댓글 불러오는 중…' }));
+  const section = el('section', { class: 'comments' }, title, list, status);
+  const seen = new Set();
+
+  const add = (items) => {
+    const fresh = items.filter((c) => !seen.has(c.id || c.text));
+    for (const c of fresh) seen.add(c.id || c.text);
+    list.append(...fresh.map(commentItem));
+  };
+
+  async function loadFirst() {
+    try {
+      const data = await api(`/api/comments?id=${encodeURIComponent(id)}`);
+      if (token !== renderToken) return;
+      if (data.count) title.textContent = data.count;
+      status.replaceChildren();
+      if (!data.items.length) {
+        list.replaceChildren(el('p', { class: 'comments-empty', text: data.off ? '댓글을 쓸 수 없는 영상이에요.' : '아직 댓글이 없어요.' }));
+        return;
+      }
+      add(data.items);
+      let next = data.next;
+      if (next) {
+        infiniteScroll(token, status, async () => {
+          const page = await api(`/api/comments?cont=${encodeURIComponent(next)}`);
+          next = page.next;
+          add(page.items);
+          return !!next;
+        });
+      }
+    } catch (err) {
+      if (token !== renderToken) return;
+      status.replaceChildren(errorView(err.message, () => {
+        status.replaceChildren(el('div', { class: 'feed-loading', text: '댓글 불러오는 중…' }));
+        loadFirst();
+      }));
+    }
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    if (token !== renderToken) return observer.disconnect();
+    if (entries.some((e) => e.isIntersecting)) {
+      observer.disconnect();
+      loadFirst();
+    }
+  }, { rootMargin: '400px 0px' });
+  observer.observe(section);
+  return section;
+}
+
+function commentItem(c) {
+  const avatar = safeImg(c.avatar)
+    ? el('img', { class: 'comment-avatar', src: c.avatar, alt: '', loading: 'lazy' })
+    : el('div', { class: 'comment-avatar placeholder', text: (c.author || '?').replace(/^@/, '').slice(0, 1) });
+  const stats = [c.likes && `👍 ${c.likes}`, c.replies && `답글 ${c.replies}개`].filter(Boolean).join('   ');
+  return el('div', { class: 'comment' },
+    avatar,
+    el('div', { class: 'comment-body' },
+      el('div', { class: 'comment-head' },
+        el('span', { class: 'comment-author', text: c.author || '' }),
+        el('span', { class: 'comment-time', text: c.published || '' })),
+      el('div', { class: 'comment-text' }, linkify(c.text || '')),
+      stats ? el('div', { class: 'comment-stats', text: stats }) : null));
+}
+
+// 홈 맨 위 '이어서 보기' 줄 (보다 만 영상)
+function continueRow() {
+  const items = continueWatching(12);
+  if (!items.length) return null;
+  const row = el('div', { class: 'continue-row' }, ...items.map((p) => videoCard({
+    id: p.id,
+    title: p.title,
+    channel: p.channel || '',
+    meta: `${formatTime(p.t)} / ${formatTime(p.d)}`,
+    duration: '',
+    thumbnail: `https://i.ytimg.com/vi/${p.id}/mqdefault.jpg`
+  })));
+  return el('section', { class: 'continue' }, el('h2', { class: 'section-title', text: '이어서 보기' }), row);
 }
 
 async function renderChannel(id, token) {
@@ -586,6 +697,7 @@ function route() {
   const [path, query = ''] = hash.split('?');
   const parts = path.split('/').filter(Boolean);
   onPlayerEnded = null;
+  stopWatching();
   closeMobileSearch();
   updateAccountUI();
   document.body.classList.remove('shorts-mode');
@@ -1011,13 +1123,40 @@ function playerCommand(func) {
 window.addEventListener('message', (e) => {
   const msg = readPlayerMessage(e);
   if (!msg) return;
+  if (msg.duration !== undefined) playerDuration = msg.duration;
+  if (msg.time !== undefined) playerTime = msg.time;
   if (msg.state !== undefined) {
     const ended = msg.state === ENDED && playerState !== ENDED;
+    const paused = msg.state === PAUSED && playerState !== PAUSED;
     playerState = msg.state;
+    if (ended && watching) forgetProgress(watching.id);
+    if (paused) saveWatching(true);
     if (ended) onPlayerEnded?.();
   }
-  if (msg.time !== undefined) playerTime = msg.time;
+  saveWatching(false);
 });
+
+// ---------- 이어보기: 보는 중인 영상의 위치를 몇 초마다 저장 ----------
+
+let watching = null; // { id, meta } 시청 화면에서만
+let playerDuration = 0;
+let lastSaved = 0;
+
+function saveWatching(force) {
+  if (!watching || playerState === ENDED || !(playerTime > 0)) return;
+  if (!force && Date.now() - lastSaved < 5000) return;
+  lastSaved = Date.now();
+  saveProgress(watching.id, playerTime, playerDuration, watching.meta);
+}
+
+// 다른 화면으로 가거나 탭을 닫을 때 마지막 위치를 저장한다
+function stopWatching() {
+  saveWatching(true);
+  watching = null;
+  playerTime = 0;
+  playerDuration = 0;
+}
+window.addEventListener('pagehide', () => saveWatching(true));
 
 // ---------- 팝업으로 보기 (롱폼) ----------
 // 지금 보던 위치부터 작은 창에서 이어 보고, 원래 화면의 영상은 멈춘다. 팝업에서는 정한 키(기본 Q)로 바로 닫힌다.
@@ -1188,6 +1327,7 @@ function updateHistoryInfo() {
 
 document.getElementById('clearHistoryBtn').addEventListener('click', () => {
   clearHistory();
+  clearProgress();
   try { localStorage.removeItem(SHORTS_SEEN_KEY); } catch {}
   updateHistoryInfo();
 });

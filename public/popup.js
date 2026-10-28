@@ -4,21 +4,38 @@ import {
   POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT, loadShortcut, matchesShortcut, keepKeyboardFocus
 } from './shortcuts.js';
 import {
-  embedUrl, listenTo, readPlayerMessage, autostart, loadAutoplay, recordWatch, pickNext, savePopupBounds, ENDED
+  embedUrl, listenTo, readPlayerMessage, autostart, loadAutoplay, recordWatch, pickNext, savePopupBounds, ENDED, PAUSED,
+  resumeTime, saveProgress, forgetProgress
 } from './player.js';
 import { applyDisguise, isDisguiseKey } from './disguise.js';
 
 const VIDEO_ID = /^[\w-]{11}$/;
 const params = new URLSearchParams(location.search);
 let currentId = params.get('v') || '';
-const start = Math.max(0, Number.parseInt(params.get('t') || '0', 10) || 0);
+// t 가 없으면(목록에서 바로 연 경우 등) 전에 보던 위치부터
+const start = Math.max(0, Number.parseInt(params.get('t') || '0', 10) || 0) || resumeTime(currentId);
 
 let playerState = -1;
+let playerTime = 0;
+let playerDuration = 0;
+let currentMeta = null;
+let lastSaved = 0;
 let iframe = null;
 
-function play(id, startAt = 0) {
+// 이어보기: 몇 초마다, 멈췄을 때, 창을 닫을 때 위치를 저장한다
+function saveNow(force) {
+  if (playerState === ENDED || !(playerTime > 0)) return;
+  if (!force && Date.now() - lastSaved < 5000) return;
+  lastSaved = Date.now();
+  saveProgress(currentId, playerTime, playerDuration, currentMeta);
+}
+
+function play(id, startAt = 0, meta = null) {
   currentId = id;
+  currentMeta = meta;
   playerState = -1;
+  playerTime = 0;
+  playerDuration = 0;
   history.replaceState(null, '', `?v=${id}&t=${startAt}`);
   document.querySelector('.unmute-btn')?.remove();
   if (!iframe) {
@@ -44,17 +61,28 @@ async function playNext() {
     const next = pickNext((await res.json()).related, currentId);
     if (!next) return;
     recordWatch(next.id);
-    play(next.id);
+    play(next.id, 0, { title: next.title, channel: next.channel });
   } catch {}
 }
 
 window.addEventListener('message', (e) => {
   const msg = readPlayerMessage(e);
-  if (msg?.state === undefined) return;
-  const ended = msg.state === ENDED && playerState !== ENDED;
-  playerState = msg.state;
-  if (ended) playNext();
+  if (!msg) return;
+  if (msg.duration !== undefined) playerDuration = msg.duration;
+  if (msg.time !== undefined) playerTime = msg.time;
+  if (msg.state !== undefined) {
+    const ended = msg.state === ENDED && playerState !== ENDED;
+    const paused = msg.state === PAUSED && playerState !== PAUSED;
+    playerState = msg.state;
+    if (ended) {
+      forgetProgress(currentId);
+      playNext();
+    }
+    if (paused) saveNow(true);
+  }
+  saveNow(false);
 });
+window.addEventListener('pagehide', () => saveNow(true));
 
 if (VIDEO_ID.test(currentId)) {
   play(currentId, start);

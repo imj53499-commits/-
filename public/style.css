@@ -118,6 +118,36 @@ body.sidebar-collapsed .content { padding-left: 24px; }
   .card:hover .card-popup { display: grid; }
 }
 .feed-note { margin: 4px 0 0; color: var(--text-sub); font-size: 13px; }
+
+/* 이어보기 */
+.card-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255, 255, 255, .45); }
+.card-progress > div { height: 100%; background: #ff0033; }
+.card-progress ~ .duration { bottom: 10px; }
+.continue { margin: 8px 0 20px; }
+.continue .section-title { margin: 4px 0 12px; font-size: 18px; }
+.continue-row { display: grid; grid-auto-flow: column; grid-auto-columns: 260px; gap: 14px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+.continue-row .card-title { font-size: 14px; }
+.resume-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 8px 8px 8px 14px;
+  border-radius: 12px; background: var(--bg-soft); font-size: 14px; color: var(--text-sub);
+}
+.resume-bar button { padding: 6px 14px; border-radius: 16px; background: var(--bg); font-weight: 600; color: var(--text); }
+
+/* 댓글 */
+.comments { margin-top: 24px; }
+.comments-title { font-size: 18px; margin: 0 0 16px; }
+.comment-list { display: flex; flex-direction: column; gap: 18px; }
+.comment { display: flex; gap: 12px; }
+.comment-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--skeleton); }
+.comment-avatar.placeholder { display: grid; place-items: center; font-weight: 700; color: var(--text-sub); }
+.comment-body { min-width: 0; flex: 1; }
+.comment-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.comment-author { font-weight: 600; font-size: 13px; }
+.comment-time { color: var(--text-sub); font-size: 12px; }
+.comment-text { font-size: 14px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.comment-text a { color: #3ea6ff; }
+.comment-stats { margin-top: 6px; color: var(--text-sub); font-size: 12px; white-space: pre; }
+.comments-empty { color: var(--text-sub); margin: 0; }
 .feed-status { min-height: 1px; }
 .feed-loading, .feed-end { padding: 32px 0; text-align: center; color: var(--text-sub); }
 .feed-end { margin: 0; }
@@ -484,6 +514,13 @@ body.shorts-mode .content { padding-bottom: 0; }
   .description { margin: 12px 12px 0; max-height: 96px; font-size: 13px; }
   .watch aside { margin-top: 20px; }
   .watch .message { padding: 24px 12px; }
+  .comments { padding: 0 12px; }
+  .resume-bar { margin: 10px 12px 0; }
+  .continue { margin: 8px 0 16px; }
+  .continue .section-title { margin: 4px 12px 10px; }
+  .continue-row { grid-auto-columns: 72%; padding: 0 12px 6px; }
+  .continue-row .thumb { border-radius: 10px; }
+  .continue-row .card-body { padding: 0; }
 
   /* 채널 */
   .channel-banner { border-radius: 0; margin-top: 0; aspect-ratio: 4 / 1; }

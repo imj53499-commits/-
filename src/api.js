@@ -158,6 +158,19 @@ export async function handleApi(url, yt) {
         if (!VIDEO_ID.test(id)) return json({ error: '잘못된 영상 ID' }, 400);
         return json(await cached(`video:${id}`, () => yt.video(id)));
       }
+      // 댓글: id 로 첫 페이지, cont(next)로 다음 페이지 → { items, next, count }
+      case '/api/comments': {
+        const cont = q('cont', 3000);
+        if (cont) {
+          if (!CONTINUATION.test(cont)) return json({ error: '잘못된 요청' }, 400);
+          return json(await cached(`commentsc:${cont}`, () => yt.comments(cont)));
+        }
+        const id = q('id', 20);
+        if (!VIDEO_ID.test(id)) return json({ error: '잘못된 영상 ID' }, 400);
+        const video = await cached(`video:${id}`, () => yt.video(id));
+        if (!video.commentsToken) return json({ items: [], next: null, count: '', off: true });
+        return json(await cached(`comments:${id}`, () => yt.comments(video.commentsToken)));
+      }
       // 최근 본 영상(최대 RECOMMEND_SEEDS 개)의 관련 영상을 섞어서 추천한다. 시청 기록은 브라우저에만 있고 서버에 저장하지 않는다.
       case '/api/recommend': {
         const ids = [...new Set(q('ids', 100).split(','))].filter((id) => VIDEO_ID.test(id)).slice(0, RECOMMEND_SEEDS);

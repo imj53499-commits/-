@@ -189,6 +189,81 @@ export function findContinuation(root) {
 
 export const CONTINUATION = /^[\w%=-]{10,3000}$/;
 
+// ---------- 댓글 ----------
+
+// 영상 정보(next 응답)에서 댓글을 불러오는 토큰을 찾는다.
+function commentsTokenOf(data, results) {
+  const section = results.find((c) => c.itemSectionRenderer?.sectionIdentifier === 'comment-item-section');
+  if (section) return findContinuation(section);
+  const panel = (data.engagementPanels || []).find((p) =>
+    p.engagementPanelSectionListRenderer?.panelIdentifier === 'engagement-panel-comments-section');
+  return panel ? findContinuation(panel.engagementPanelSectionListRenderer.content) : null;
+}
+
+function shortCount(n) {
+  const s = typeof n === 'number' ? String(n) : text(n);
+  return s === '0' ? '' : s;
+}
+
+// 댓글 응답 해석. 예전 형식(commentRenderer)과 새 형식(commentViewModel + entity) 둘 다 읽는다.
+export function parseComments(data) {
+  const actions = [...(data.onResponseReceivedEndpoints || []), ...(data.onResponseReceivedActions || [])];
+  const items = [];
+  let count = '';
+  let next = null;
+  const entities = new Map();
+  for (const m of data.frameworkUpdates?.entityBatchUpdate?.mutations || []) {
+    if (m.payload?.commentEntityPayload) entities.set(m.entityKey, m.payload.commentEntityPayload);
+    if (m.payload?.engagementToolbarStateEntityPayload) entities.set(m.entityKey, m.payload.engagementToolbarStateEntityPayload);
+  }
+
+  for (const action of actions) {
+    const list = action.reloadContinuationItemsCommand?.continuationItems ||
+      action.appendContinuationItemsAction?.continuationItems || [];
+    for (const item of list) {
+      // 다음 댓글 페이지 토큰은 목록 맨 끝에만 있다 (각 댓글의 답글 토큰과 섞이지 않게 여기서만 읽는다)
+      const more = item.continuationItemRenderer;
+      if (more) {
+        next = more.continuationEndpoint?.continuationCommand?.token ||
+          more.button?.buttonRenderer?.command?.continuationCommand?.token || next;
+      }
+      if (item.commentsHeaderRenderer) count = text(item.commentsHeaderRenderer.countText) || text(item.commentsHeaderRenderer.commentsCount);
+      const thread = item.commentThreadRenderer;
+      if (!thread) continue;
+      const replies = thread.replies?.commentRepliesRenderer;
+      const replyCount = text(replies?.viewReplies?.buttonRenderer?.text).replace(/[^\d,.만천]/g, '') || '';
+      const old = thread.comment?.commentRenderer;
+      if (old) {
+        items.push({
+          id: old.commentId,
+          author: text(old.authorText),
+          avatar: lastUrl(old.authorThumbnail?.thumbnails),
+          text: text(old.contentText),
+          published: text(old.publishedTimeText),
+          likes: shortCount(old.voteCount),
+          replies: shortCount(old.replyCount) || replyCount
+        });
+        continue;
+      }
+      const vm = thread.commentViewModel?.commentViewModel;
+      const entity = vm && entities.get(vm.commentKey);
+      if (entity) {
+        const props = entity.properties || {};
+        items.push({
+          id: props.commentId,
+          author: entity.author?.displayName || '',
+          avatar: fixUrl(entity.author?.avatarThumbnailUrl || ''),
+          text: text(props.content),
+          published: props.publishedTime || '',
+          likes: shortCount(entity.toolbar?.likeCountNotliked),
+          replies: shortCount(entity.toolbar?.replyCount) || replyCount
+        });
+      }
+    }
+  }
+  return { items: items.filter((c) => c.text), next, count };
+}
+
 // ---------- API 호출 ----------
 
 export function createYouTube(fetchFn = fetch) {
@@ -253,8 +328,15 @@ export function createYouTube(fetchFn = fetch) {
         channelId: browseIdOf(owner?.title?.runs?.[0]) || owner?.navigationEndpoint?.browseEndpoint?.browseId || '',
         channelAvatar: lastUrl(owner?.thumbnail?.thumbnails),
         subscribers: text(owner?.subscriberCountText),
-        related: extractVideos(watch?.secondaryResults, 30).filter((v) => !v.isShort && v.id !== id).slice(0, 20)
+        related: extractVideos(watch?.secondaryResults, 30).filter((v) => !v.isShort && v.id !== id).slice(0, 20),
+        commentsToken: commentsTokenOf(data, results)
       };
+    },
+
+    // 댓글 한 페이지 → { items, next, count }
+    async comments(continuation) {
+      const data = await call('next', { continuation });
+      return parseComments(data);
     },
 
     async channel(id) {
