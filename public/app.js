@@ -704,6 +704,11 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     submit,
     el('p', { class: 'auth-foot', text: signup ? '이메일은 필요 없어요 · 관리자가 승인하면 바로 쓸 수 있어요' : '처음이라면 위에서 가입하기를 눌러 주세요' }));
 
+  // 다시 입력하기 시작하면 이전 오류 문구는 지운다 (안내/승인 대기 문구는 남겨 둔다)
+  form.addEventListener('input', () => {
+    if (message.className === 'auth-message') message.textContent = '';
+  });
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     message.className = 'auth-message';
