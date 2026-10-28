@@ -79,7 +79,7 @@ function skeletonGrid(count = 12) {
 }
 
 // 브라우저 방문 기록·탭에는 이 제목만 남는다. 영상 제목이나 검색어, 사이트 이름은 넣지 않는다.
-const PAGE_TITLE = '새 탭';
+const PAGE_TITLE = 'Google';
 
 function setTitle() {
   document.title = PAGE_TITLE;
@@ -457,16 +457,26 @@ function rememberShort(id) {
 }
 // 화면에 보이는 쇼츠 하나에만 플레이어를 넣고, 나머지는 썸네일로 둔다 (가볍게).
 
-function shortPlayer(id) {
-  return el('iframe', {
-    src: embedUrl(id, `&loop=1&playlist=${id}`),
+// preload: 다음 쇼츠를 미리 불러 두기만 하고(재생 X), 넘겨서 보이게 되면 바로 재생한다.
+function shortPlayer(id, preload = false) {
+  const iframe = el('iframe', {
+    src: embedUrl(id, `&loop=1&playlist=${id}`, !preload),
     title: '쇼츠 플레이어',
     allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
     allowfullscreen: '',
-    referrerpolicy: 'strict-origin-when-cross-origin',
-    'data-player': '',
-    onload: (e) => listenToPlayer(e.target)
+    referrerpolicy: 'strict-origin-when-cross-origin'
   });
+  if (!preload) iframe.setAttribute('data-player', '');
+  iframe.addEventListener('load', () => {
+    iframe.dataset.loaded = '1';
+    if (iframe.hasAttribute('data-player')) startShort(iframe);
+  });
+  return iframe;
+}
+
+function startShort(iframe) {
+  listenToPlayer(iframe);
+  sendToPlayer(iframe, 'playVideo');
 }
 
 function shortSlide(v) {
@@ -497,14 +507,29 @@ async function renderShorts(token) {
 
   function activate(slide) {
     if (active === slide) return;
-    if (active) active.querySelector('iframe')?.remove();
+    const slides = [...feed.querySelectorAll('.short')];
+    const next = slides[slides.indexOf(slide) + 1];
+    // 지금 쇼츠와 바로 다음 쇼츠에만 플레이어를 둔다 (나머지는 치워서 가볍게)
+    for (const s of slides) if (s !== slide && s !== next) s.querySelector('iframe')?.remove();
+    const previous = active?.querySelector('iframe');
+    if (previous) {
+      previous.removeAttribute('data-player');
+      sendToPlayer(previous, 'pauseVideo');
+    }
     active = slide;
     rememberShort(slide.dataset.id);
     playerState = -1;
-    slide.querySelector('.short-frame').append(shortPlayer(slide.dataset.id));
-    // 끝에서 세 번째쯤 오면 다음 쇼츠를 미리 불러온다
-    const slides = feed.querySelectorAll('.short');
-    if ([...slides].indexOf(slide) >= slides.length - 8) loadMore();
+    const ready = slide.querySelector('iframe');
+    if (ready) {
+      // 미리 불러 둔 플레이어 → 기다리지 않고 바로 재생
+      ready.setAttribute('data-player', '');
+      if (ready.dataset.loaded) startShort(ready);
+    } else {
+      slide.querySelector('.short-frame').append(shortPlayer(slide.dataset.id));
+    }
+    if (next && !next.querySelector('iframe')) next.querySelector('.short-frame').append(shortPlayer(next.dataset.id, true));
+    // 끝에서 여덟 번째쯤 오면 다음 쇼츠 목록을 미리 불러온다
+    if (slides.indexOf(slide) >= slides.length - 8) loadMore();
   }
 
   const observer = new IntersectionObserver((entries) => {
@@ -935,6 +960,27 @@ const cover = el('div', { class: 'cover', hidden: '' });
 document.body.append(cover);
 let resumeAfterCover = false;
 
+// 가린 화면: 검색 시작 페이지처럼 보이게 하고, 검색하면 실제 Google 검색으로 간다.
+// 가릴 때만 그리고 돌아오면 지운다 (평소 페이지에는 이 모양이 없도록).
+function showDecoy() {
+  const input = el('input', { type: 'text', name: 'q', autocomplete: 'off', spellcheck: 'false', 'aria-label': '검색' });
+  const form = el('form', { class: 'decoy-search', role: 'search' },
+    el('span', { class: 'decoy-icon', 'aria-hidden': 'true' }),
+    input);
+  const submit = () => {
+    const q = input.value.trim();
+    if (q) location.href = `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  };
+  form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
+  cover.replaceChildren(el('div', { class: 'decoy' },
+    el('div', { class: 'decoy-logo', 'aria-label': 'Google' },
+      ...[...'Google'].map((ch, i) => el('span', { class: `decoy-c${i}`, text: ch }))),
+    form,
+    el('div', { class: 'decoy-buttons' },
+      el('button', { type: 'button', text: 'Google 검색', onclick: submit }),
+      el('button', { type: 'button', text: "I'm Feeling Lucky", onclick: submit }))));
+}
+
 function toggleCover() {
   if (cover.hidden) {
     resumeAfterCover = playerState === 1;
@@ -942,10 +988,12 @@ function toggleCover() {
     closePopup();
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
     closeMobileSearch();
+    showDecoy();
     cover.hidden = false;
     focusSink.focus({ preventScroll: true });
   } else {
     cover.hidden = true;
+    cover.replaceChildren();
     if (resumeAfterCover) playerCommand('playVideo');
     resumeAfterCover = false;
   }

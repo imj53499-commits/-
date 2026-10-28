@@ -10,8 +10,9 @@ export const BUFFERING = 3;
 // 처음 열었을 때 이 시간 안에 재생이 시작되지 않으면(브라우저의 자동재생 차단) 소리를 끄고 다시 재생한다.
 const AUTOSTART_TIMEOUT = 2500;
 
-export function embedUrl(id, extra = '') {
-  return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1&enablejsapi=1` +
+// autoplay=false 는 미리 불러만 두고 재생은 나중에 playVideo 로 시작할 때 쓴다.
+export function embedUrl(id, extra = '', autoplay = true) {
+  return `https://www.youtube-nocookie.com/embed/${id}?autoplay=${autoplay ? 1 : 0}&rel=0&playsinline=1&enablejsapi=1` +
     `&origin=${encodeURIComponent(location.origin)}${extra}`;
 }
 

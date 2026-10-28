@@ -290,7 +290,34 @@ body.shorts-mode .content { padding-bottom: 0; }
 .shorts .message { padding-top: 120px; }
 
 /* 가리기: 아무것도 없는 빈 화면 */
-.cover { position: fixed; inset: 0; z-index: 1000; background: var(--bg); cursor: default; }
+.cover { position: fixed; inset: 0; z-index: 1000; background: var(--decoy-bg); color: var(--decoy-text); cursor: default; }
+:root { --decoy-bg: #fff; --decoy-text: #202124; --decoy-border: #dfe1e5; --decoy-btn: #f8f9fa; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --decoy-bg: #202124; --decoy-text: #e8eaed; --decoy-border: #5f6368; --decoy-btn: #303134; }
+}
+:root[data-theme="dark"] { --decoy-bg: #202124; --decoy-text: #e8eaed; --decoy-border: #5f6368; --decoy-btn: #303134; }
+.decoy { display: flex; flex-direction: column; align-items: center; padding: 0 16px; margin-top: max(120px, 22vh); font-family: Arial, sans-serif; }
+.decoy-logo { font-size: clamp(56px, 12vw, 92px); letter-spacing: -0.04em; font-weight: 500; user-select: none; margin-bottom: 26px; }
+.decoy-c0, .decoy-c3 { color: #4285f4; }
+.decoy-c1, .decoy-c5 { color: #ea4335; }
+.decoy-c2 { color: #fbbc05; }
+.decoy-c4 { color: #34a853; }
+.decoy-search {
+  position: relative; display: flex; align-items: center; width: min(584px, 100%); height: 46px;
+  border: 1px solid var(--decoy-border); border-radius: 24px; background: var(--decoy-bg);
+}
+.decoy-search:hover, .decoy-search:focus-within { box-shadow: 0 1px 6px rgba(32, 33, 36, .28); border-color: transparent; }
+.decoy-icon {
+  width: 14px; height: 14px; margin: 0 12px 0 18px; border: 2px solid #9aa0a6; border-radius: 50%; position: relative; flex-shrink: 0;
+}
+.decoy-icon::after { content: ''; position: absolute; width: 2px; height: 7px; background: #9aa0a6; right: -4px; bottom: -6px; transform: rotate(-45deg); }
+.decoy-search input { flex: 1; height: 100%; border: 0; outline: none; background: transparent; color: var(--decoy-text); font-size: 16px; padding-right: 18px; }
+.decoy-buttons { display: flex; gap: 12px; margin-top: 28px; }
+.decoy-buttons button {
+  height: 36px; padding: 0 16px; border: 1px solid var(--decoy-btn); border-radius: 4px; background: var(--decoy-btn);
+  color: var(--decoy-text); font: 14px Arial, sans-serif;
+}
+.decoy-buttons button:hover { border-color: var(--decoy-border); }
 .cover[hidden] { display: none; }
 
 /* ---------- 휴대폰 ---------- */
