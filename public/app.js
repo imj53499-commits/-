@@ -40,10 +40,20 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+const NETWORK_ERROR = '서버에 연결하지 못했어요. 인터넷(와이파이)이 끊겼거나 학교·회사 인터넷이 이 주소를 막았을 수 있어요. 잠시 뒤 다시 해 보거나 다른 인터넷(데이터)으로 해 보세요.';
+
 async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(path, body === undefined
+  const init = body === undefined
     ? { method }
-    : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  let res;
+  try {
+    res = await fetch(path, init);
+  } catch {
+    // 와이파이가 잠깐 끊기는 경우가 많아서 한 번만 다시 시도한다.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try { res = await fetch(path, init); } catch { throw new Error(NETWORK_ERROR); }
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     // 로그인이 풀렸으면(승인 취소, 만료 등) 로그인 화면으로 돌아간다.
