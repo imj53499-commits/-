@@ -3,6 +3,7 @@
 관리자가 승인한 사람만 들어와서 볼 수 있는 YouTube 뷰어입니다. Cloudflare Pages 무료 플랜에서 돌아갑니다.
 
 - 앱 목록: 들어가면 처음에 앱 목록이 나오고, 여기서 School YouTube 를 고름 (왼쪽 위 ⋮⋮⋮ 버튼으로 언제든 돌아옴). 앱을 더 넣으려면 `public/app.js` 의 `APPS` 에 추가
+- 체스 (앱 목록 → 체스): 컴퓨터랑 두기 (Stockfish, 1~10단계, 무르기·힌트, 이 브라우저에서 계산), 한 화면에서 둘이 두기, 친구랑 온라인 대결 (방 만들기 → 6자리 코드·링크로 참여, 공개 방 목록, 시간 제한, 무승부 제안, 기권, 한 판 더, 구경하기). 온라인 대결은 아래 'D1 연결'이 필요함
 - 체험하기: 로그인·가입 화면의 '1시간 체험해 보기'로 가입 없이 1시간 동안 쓸 수 있음 (오른쪽 아래에 남은 시간, 끝나면 로그인 화면으로). 한 브라우저에서 하루에 한 번, 한 연결(IP)당 1시간에 30번까지. 차단된 기기는 체험도 안 됨
 - 홈(YouTube): 앱 목록에서 들어가면 인기/추천 영상 목록 (카테고리: 음악, 게임, 뉴스, 스포츠 …). 카테고리마다 여러 검색어를 들어올 때마다 다른 순서로 써서 사람마다·방문마다 다른 영상이 나오고, 아래로 내리면 계속 더 불러옴 (무한 스크롤)
 - 추천: 최근 본 영상 2개의 관련 영상을 (아래로 내릴수록 그 전에 본 영상들 순서로) 홈(전체)에 인기 영상과 섞어서 보여 줌. 본 영상은 다시 안 나옴. 시청 기록은 브라우저에만 저장 (⚙에서 지우기, 본 쇼츠 목록과 이어보기 위치도 같이 지워짐)
@@ -47,6 +48,12 @@ YouTube API 키는 필요 없습니다. 서버(Pages Functions)가 YouTube 내�
    → Type **Secret**, Name `ADMIN_PASSWORD`, Value 원하는 비밀번호 → 저장 후 다시 배포
 3. `https://<내 주소>/#/admin` 에서 관리자 비밀번호로 들어가 가입 신청을 승인/거절
 
+### 체스 온라인 대결용 D1 연결 (처음 한 번)
+
+1. Cloudflare → **Storage & databases** → **D1 SQL Database** → **Create** (이름 예: `schoolyoutube-chess`)
+2. 만들어진 D1 의 **Database ID** 를 `wrangler.jsonc` 의 `d1_databases` 에 넣기 (binding 이름은 `CHESS`). 표는 처음 쓸 때 자동으로 만들어짐
+3. 연결 전에도 컴퓨터랑 두기·한 화면에서 두기는 됨
+
 KV 를 연결하기 전에는 로그인 없이 누구나 볼 수 있고, 연결하는 순간부터 로그인이 필요해집니다. 계정은 KV 에 저장되고, 비밀번호는 PBKDF2 로 해시해서 저장합니다. 로그인 유지 기간은 30일(관리자는 12시간)입니다.
 
 ## 터미널로 올리기
@@ -73,6 +80,9 @@ npm test
 | `src/server.js` | `/api/*` 입구: 로그인 확인 후 영상 API 로 전달 |
 | `src/auth.js` | 가입, 로그인, 세션, 관리자 승인·차단, 문의함, 비밀번호 초기화·변경 (KV 저장) |
 | `src/api.js` | API 라우트 (`/api/home`, `/api/recommend`, `/api/comments`, `/api/shorts`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
+| `src/chess.js` | 온라인 체스 방 (`/api/chess/*`, D1 저장) |
+| `public/chess-app.js` | 체스 화면 (판, 컴퓨터, 온라인 방) |
+| `public/vendor/` | chess.js (BSD-2), Stockfish.js 10 (GPL, `stockfish/COPYING.txt`), 체스 말 그림 `pieces.svg` (Cburnett, CC BY-SA 3.0, Wikimedia Commons) |
 | `src/youtube.js` | YouTube 내부 API 호출과 응답에서 영상 정보 추출 |
 | `public/` | 화면 (HTML/CSS/JS, 빌드 불필요). `popup.html`/`popup.js` 는 팝업 플레이어, `shortcuts.js` 는 단축키, `player.js` 는 플레이어·자동재생·시청 기록 공통 코드 |
 | `wrangler.jsonc` | Cloudflare Pages 설정 (출력 폴더 `public`) |

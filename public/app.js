@@ -168,8 +168,31 @@ function videoGrid(items, className = 'grid') {
 // ---------- 앱 목록 (처음 화면) ----------
 // 앱을 더 넣을 때는 여기에 하나씩 추가한다.
 const APPS = [
-  { id: 'youtube', name: 'School YouTube', href: '#/youtube', color: 'linear-gradient(135deg, #34d399, #10b981 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z"/></svg>' }
+  { id: 'youtube', name: 'School YouTube', href: '#/youtube', color: 'linear-gradient(135deg, #34d399, #10b981 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z"/></svg>' },
+  { id: 'chess', name: '체스', href: '#/chess', color: 'linear-gradient(135deg, #a3a3a3, #57534e 55%, #1c1917)', icon: '<svg viewBox="0 0 24 24"><path d="M12 2.5a2 2 0 0 1 1.2 3.6c1.5.6 2.6 1.8 2.6 3.4 0 1-.5 1.9-1.2 2.5l1.4 5H8l1.4-5a3.3 3.3 0 0 1-1.2-2.5c0-1.6 1.1-2.8 2.6-3.4A2 2 0 0 1 12 2.5zM6.5 18.5h11l1 3h-13z"/></svg>' }
 ];
+
+// ---------- 다른 앱 (체스 등): 필요할 때만 불러온다 ----------
+
+let chessModule = null;
+
+async function openChess(parts, token) {
+  setTitle();
+  setActiveNav('');
+  document.body.classList.add('app-mode');
+  appTitle.textContent = '체스';
+  if (!chessModule) {
+    app.replaceChildren(el('p', { class: 'message', text: '불러오는 중…' }));
+    try {
+      chessModule = await import('./chess-app.js');
+    } catch {
+      if (token === renderToken) app.replaceChildren(errorView('체스를 불러오지 못했어요.', () => route()));
+      return;
+    }
+  }
+  if (token !== renderToken) return;
+  chessModule.renderChess(parts, { app, el, api, me, showToast, isCurrent: () => token === renderToken });
+}
 
 function renderLauncher() {
   setTitle();
@@ -194,6 +217,7 @@ function renderLauncher() {
 
 const TRIAL_ENDED = '체험 시간(1시간)이 끝났어요. 계속 쓰려면 가입해 주세요.';
 const trialBar = document.getElementById('trialBar');
+const appTitle = document.getElementById('appTitle');
 let trialTimer = null;
 
 function updateTrialBar() {
@@ -771,7 +795,8 @@ function route() {
   stopWatching();
   closeMobileSearch();
   updateAccountUI();
-  document.body.classList.remove('shorts-mode', 'launcher-mode');
+  document.body.classList.remove('shorts-mode', 'launcher-mode', 'app-mode');
+  chessModule?.stopChess();
 
   if (parts[0] === 'admin') return renderAdmin(token);
   document.body.classList.toggle('auth-mode', !me || !!me.mustChange);
@@ -801,6 +826,7 @@ function route() {
     if (q.trim()) return renderSearch(q.trim(), token);
   }
   if (!parts.length) return renderLauncher();
+  if (parts[0] === 'chess') return openChess(parts, token);
   searchInput.value = '';
   const category = parts[0] === 'c' && CATEGORY_LABELS[parts[1]] ? parts[1] : 'all';
   return renderHome(category, token);
