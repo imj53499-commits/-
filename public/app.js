@@ -1541,14 +1541,16 @@ async function openPopup(id, start = Math.floor(playerTime || 0)) {
   const width = Math.min(saved?.width ?? 854, screen.availWidth - 20);
   const height = Math.min(saved?.height ?? Math.round(width * 9 / 16), screen.availHeight - 20);
   const url = `/popup.html?v=${encodeURIComponent(id)}&t=${start}`;
+  let why = '이 브라우저는 항상 위 창을 지원하지 않아요 (크롬·엣지 116 이상 필요)';
   if ('documentPictureInPicture' in window) {
     try {
       if (popupWin !== window.documentPictureInPicture.window) closePopup(); // 일반 팝업이 떠 있었으면 닫기
       popupWin = await openPinnedPopup(url, width, height);
       playerCommand('pauseVideo');
       return;
-    } catch {
+    } catch (err) {
       // 막히면 아래 일반 팝업으로
+      why = `항상 위 창을 열지 못했어요 (${err?.name || '오류'}: ${err?.message || ''})`;
     }
   }
   const left = saved?.left ?? screen.availWidth - width - 20;
@@ -1561,6 +1563,15 @@ async function openPopup(id, start = Math.floor(playerTime || 0)) {
   }
   popupWin = win;
   playerCommand('pauseVideo');
+  showToast(`${why}. 일반 팝업으로 열어서 다른 창을 누르면 뒤로 갈 수 있어요.`);
+}
+
+// 화면 아래에 잠깐 뜨는 안내
+function showToast(text) {
+  document.querySelector('.toast')?.remove();
+  const toast = el('div', { class: 'toast', role: 'status', text });
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 7000);
 }
 
 function closePopup() {
