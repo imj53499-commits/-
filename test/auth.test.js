@@ -386,3 +386,50 @@ test('차단은 관리자만', async () => {
   const res = await call('/api/admin/users', { method: 'POST', body: { action: 'block', username: '민수' } });
   assert.equal(res.status, 401);
 });
+
+test('차단된 계정과 비밀번호가 같으면 새로 가입할 수 없고 그 기기도 막힌다', async () => {
+  await signup('민수', 'secret-77');
+  const a = await adminLogin();
+  await admin('approve', '민수', a.cookie);
+  await admin('block', '민수', a.cookie);
+
+  const copy = await signup('민수부캐', 'secret-77', '김철수');
+  assert.equal(copy.status, 403);
+  assert.equal(copy.body.code, 'BLOCKED');
+  const device = deviceOf(copy.setCookie);
+  assert.ok(device);
+  assert.equal((await call('/api/admin/users', { cookie: a.cookie })).body.length, 1); // 계정이 안 생겼다
+  assert.equal((await call('/api/auth/me', { cookie: `sy_device=${device}` })).body.code, 'BLOCKED');
+
+  // 비밀번호가 다르면 가입된다
+  assert.equal((await signup('다른사람', 'other-pass')).status, 201);
+  // 비밀번호는 KV 에 그대로 남지 않는다
+  assert.ok(![...env.DB.store.values()].some((v) => v.value.includes('secret-77')));
+
+  // 차단을 풀면 같은 비밀번호로도 가입된다
+  await admin('unblock', '민수', a.cookie);
+  assert.equal((await signup('민수부캐2', 'secret-77')).status, 201);
+});
+
+test('이 기능 전에 가입한 계정도, 차단된 뒤 로그인을 시도하면 그 비밀번호가 막힌다', async () => {
+  await signup('민수', 'secret-77');
+  const a = await adminLogin();
+  await admin('approve', '민수', a.cookie);
+  // 지문이 없는 예전 계정처럼 만든다
+  const old = JSON.parse(env.DB.store.get('user:민수').value);
+  delete old.pwf;
+  env.DB.store.get('user:민수').value = JSON.stringify(old);
+  await admin('block', '민수', a.cookie);
+  assert.equal((await signup('부캐', 'secret-77')).status, 201); // 아직 모름
+
+  await login('민수', 'secret-77'); // 차단된 계정으로 로그인 시도 → 지문이 생긴다
+  assert.equal((await signup('부캐2', 'secret-77')).body.code, 'BLOCKED');
+});
+
+test('임시 비밀번호는 지문을 남기지 않는다', async () => {
+  await signup('민수', 'secret-77');
+  const a = await adminLogin();
+  await admin('approve', '민수', a.cookie);
+  await admin('reset', '민수', a.cookie);
+  assert.equal(JSON.parse(env.DB.store.get('user:민수').value).pwf, undefined);
+});

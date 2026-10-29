@@ -63,6 +63,21 @@ export async function hashPassword(password, salt) {
   return toHex(bits);
 }
 
+// 비밀번호 지문: 차단된 계정과 같은 비밀번호로 새로 가입하는 걸 알아보려고 쓴다.
+// 관리자 비밀번호를 열쇠로 한 HMAC 이라 KV 만으로는 비밀번호를 알아낼 수 없고, 계산이 가벼워
+// 가입할 때 비밀번호 해시(PBKDF2)를 한 번 더 하지 않아도 된다 (Workers CPU 제한).
+async function passwordFingerprint(env, password) {
+  if (!env.ADMIN_PASSWORD) return '';
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(`pwf:${env.ADMIN_PASSWORD}`),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return toHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(password)));
+}
+const blockedPasswordKey = (fingerprint) => `bpw:${fingerprint}`;
+
+async function addBlockedPassword(env, user) {
+  if (user.pwf) await env.DB.put(blockedPasswordKey(user.pwf), JSON.stringify({ username: user.username }));
+}
+
 function getCookie(request, name) {
   const header = request.headers.get('Cookie') || '';
   for (const part of header.split(';')) {
@@ -155,6 +170,7 @@ async function setPassword(user, password) {
   user.salt = randomHex(16);
   user.hash = await hashPassword(password, user.salt);
   user.pwv = (user.pwv || 0) + 1;
+  delete user.pwf;
 }
 
 const TEMP_PASSWORD_TTL = 24 * 60 * 60 * 1000; // 임시 비밀번호는 24시간 안에 써야 한다
@@ -219,7 +235,17 @@ async function signup(request, env) {
 
   const salt = randomHex(16);
   const createdAt = Date.now();
-  const user = { username, name, salt, hash: await hashPassword(password, salt), status: 'pending', createdAt };
+  // 차단된 계정과 비밀번호가 같으면 가입을 막고 이 기기도 차단한다.
+  const pwf = await passwordFingerprint(env, password);
+  if (pwf) {
+    const mark = await env.DB.get(blockedPasswordKey(pwf), 'json');
+    if (mark) {
+      const owner = await env.DB.get(userKey(mark.username), 'json');
+      if (!owner || owner.status === 'blocked') return blockDevice(request, env, owner || { username: mark.username });
+      await env.DB.delete(blockedPasswordKey(pwf)); // 차단이 풀린 계정 것이면 지운다
+    }
+  }
+  const user = { username, name, salt, hash: await hashPassword(password, salt), status: 'pending', createdAt, pwf };
   await putUser(env, user);
   return json({ ok: true, status: 'pending' }, 201);
 }
@@ -235,7 +261,16 @@ async function login(request, env) {
   if (user.mustChange && user.tempExpires && Date.now() > user.tempExpires) {
     return fail('임시 비밀번호가 만료됐어요. 관리자에게 다시 문의해 주세요.', 401, 'TEMP_EXPIRED');
   }
-  if (user.status === 'blocked') return blockDevice(request, env, user);
+  // 지문이 없던 계정(이 기능 전에 가입)은 비밀번호가 맞았을 때 만들어 둔다. 임시 비밀번호는 빼고.
+  const pwf = user.mustChange ? '' : await passwordFingerprint(env, password);
+  if (pwf && user.pwf !== pwf) {
+    user.pwf = pwf;
+    await putUser(env, user);
+  }
+  if (user.status === 'blocked') {
+    await addBlockedPassword(env, user);
+    return blockDevice(request, env, user);
+  }
   if (user.status === 'pending') return fail('아직 관리자 승인을 기다리고 있어요.', 403, 'PENDING');
   if (user.status !== 'approved') return fail('가입이 승인되지 않았어요.', 403, 'REJECTED');
 
@@ -256,6 +291,7 @@ async function changePassword(request, env) {
   if (next.length < 6 || next.length > 100) return fail('새 비밀번호는 6자 이상으로 정해 주세요.', 400);
   if (next === current) return fail('지금과 다른 비밀번호로 정해 주세요.', 400);
   await setPassword(user, next);
+  user.pwf = await passwordFingerprint(env, next);
   user.mustChange = false;
   delete user.tempExpires;
   await putUser(env, user);
@@ -431,7 +467,11 @@ async function updateUser(request, env) {
   user.status = status;
   if (status === 'blocked') user.blockReason = cleanText(body?.reason, 100);
   else delete user.blockReason;
-  if (action === 'unblock') await unblockDevices(env, user.username);
+  if (status === 'blocked') await addBlockedPassword(env, user);
+  if (action === 'unblock') {
+    await unblockDevices(env, user.username);
+    if (user.pwf) await env.DB.delete(blockedPasswordKey(user.pwf));
+  }
   await putUser(env, user);
   return json({ ok: true, status });
 }
