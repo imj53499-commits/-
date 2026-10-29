@@ -10,6 +10,10 @@ import {
 import { applyDisguise, isDisguiseKey } from './disguise.js';
 
 const VIDEO_ID = /^[\w-]{11}$/;
+// 항상 위에 뜨는 창(Document Picture-in-Picture) 안에 넣어서 열었으면 그 창이 host 다.
+// 닫기·크기 조절·크기 기억은 host 창에 한다. (일반 팝업 창으로 열었으면 host 는 자기 자신)
+const host = window.parent !== window ? window.parent : window;
+const inPip = host !== window;
 const params = new URLSearchParams(location.search);
 let currentId = params.get('v') || '';
 // t 가 없으면(목록에서 바로 연 경우 등) 전에 보던 위치부터
@@ -99,27 +103,34 @@ window.addEventListener('storage', (e) => {
   if (e.key === POPUP_SHORTCUT_KEY) shortcut = loadShortcut(POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT);
 });
 
-window.addEventListener('keydown', (e) => {
+function onKey(e) {
   if (matchesShortcut(e, shortcut)) {
     e.preventDefault();
+    saveNow(true);
+    rememberBounds();
     document.body.replaceChildren();
-    window.close();
+    host.close();
     return;
   }
   // - 와 = 키로 창 크기 조절
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   if (e.code === 'Minus' || e.code === 'NumpadSubtract') { e.preventDefault(); resizePopup(1 / 1.25); }
   if (e.code === 'Equal' || e.code === 'NumpadAdd') { e.preventDefault(); resizePopup(1.25); }
-}, true);
+}
+window.addEventListener('keydown', onKey, true);
+// 항상 위 창에서는 바깥 창에 초점이 있을 때도 키를 받는다.
+if (inPip) host.addEventListener('keydown', onKey, true);
 
 // ---------- 창 크기 조절: 오른쪽 위 − + 버튼, - = 키. 16:9 비율을 유지한다 ----------
 
 const MIN_WIDTH = 320;
 
 function resizePopup(factor) {
-  const width = Math.round(Math.min(Math.max(innerWidth * factor, MIN_WIDTH), screen.availWidth - 20));
+  const width = Math.round(Math.min(Math.max(host.innerWidth * factor, MIN_WIDTH), screen.availWidth - 20));
   const height = Math.round(width * 9 / 16);
-  window.resizeTo(width + (outerWidth - innerWidth), height + (outerHeight - innerHeight));
+  try {
+    host.resizeTo(width + (host.outerWidth - host.innerWidth), height + (host.outerHeight - host.innerHeight));
+  } catch {}
 }
 
 const sizeBar = document.createElement('div');
@@ -137,14 +148,15 @@ document.body.append(sizeBar);
 
 // 다음에 열 때 같은 크기와 위치로 열리도록 기억한다.
 function rememberBounds() {
-  savePopupBounds({ width: innerWidth, height: innerHeight, left: screenX, top: screenY });
+  savePopupBounds({ width: host.innerWidth, height: host.innerHeight, left: host.screenX, top: host.screenY });
 }
 let resizeTimer;
-window.addEventListener('resize', () => {
+host.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(rememberBounds, 300);
 });
 window.addEventListener('pagehide', rememberBounds);
+if (inPip) host.addEventListener('pagehide', () => { saveNow(true); rememberBounds(); });
 
 // 탭 모양(제목·아이콘)은 메인 화면 설정을 따른다.
 applyDisguise();

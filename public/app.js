@@ -1508,17 +1508,52 @@ window.addEventListener('pagehide', () => saveWatching(true));
 
 // ---------- 팝업으로 보기 (롱폼) ----------
 // 지금 보던 위치부터 작은 창에서 이어 보고, 원래 화면의 영상은 멈춘다. 팝업에서는 정한 키(기본 Q)로 바로 닫힌다.
+// 크롬·엣지는 다른 창을 눌러도 뒤로 안 가는 '항상 위' 창(Document Picture-in-Picture)으로 열고,
+// 그게 안 되는 브라우저는 일반 팝업 창으로 연다.
 
 let popupWin = null;
 
-function openPopup(id, start = Math.floor(playerTime || 0)) {
+async function openPinnedPopup(url, width, height) {
+  // 이미 열려 있으면 그 창에서 영상만 바꾼다 (탭마다 하나만 열 수 있음)
+  const open = window.documentPictureInPicture?.window;
+  const pip = open || await window.documentPictureInPicture.requestWindow({ width, height });
+  if (!open) {
+    const style = pip.document.createElement('style');
+    style.textContent = 'html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{display:block;width:100%;height:100%;border:0}';
+    pip.document.head.append(style);
+    pip.document.title = document.title;
+  }
+  let frame = pip.document.querySelector('iframe');
+  if (!frame) {
+    frame = pip.document.createElement('iframe');
+    frame.allow = 'autoplay; encrypted-media; picture-in-picture; clipboard-write';
+    frame.allowFullscreen = true;
+    pip.document.body.append(frame);
+  }
+  frame.src = url;
+  frame.focus();
+  return pip;
+}
+
+async function openPopup(id, start = Math.floor(playerTime || 0)) {
   // 지난번 팝업 크기와 위치를 그대로 쓰고, 처음이면 오른쪽 아래에 적당한 크기로 연다.
   const saved = loadPopupBounds();
   const width = Math.min(saved?.width ?? 854, screen.availWidth - 20);
   const height = Math.min(saved?.height ?? Math.round(width * 9 / 16), screen.availHeight - 20);
+  const url = `/popup.html?v=${encodeURIComponent(id)}&t=${start}`;
+  if ('documentPictureInPicture' in window) {
+    try {
+      if (popupWin !== window.documentPictureInPicture.window) closePopup(); // 일반 팝업이 떠 있었으면 닫기
+      popupWin = await openPinnedPopup(url, width, height);
+      playerCommand('pauseVideo');
+      return;
+    } catch {
+      // 막히면 아래 일반 팝업으로
+    }
+  }
   const left = saved?.left ?? screen.availWidth - width - 20;
   const top = saved?.top ?? screen.availHeight - height - 60;
-  const win = window.open(`/popup.html?v=${encodeURIComponent(id)}&t=${start}`, 'sy_popup',
+  const win = window.open(url, 'sy_popup',
     `popup,width=${width},height=${height},left=${left},top=${top}`);
   if (!win) {
     alert('팝업이 차단됐어요. 주소창 오른쪽의 팝업 차단 아이콘을 눌러 이 사이트의 팝업을 허용해 주세요.');
