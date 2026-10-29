@@ -212,6 +212,7 @@ export async function getSession(request, env, info = {}) {
   const session = await env.DB.get(`session:${token}`, 'json');
   if (!session) return null;
   if (session.role === 'admin') return { role: 'admin', token };
+  if (session.role === 'trial') return Date.now() < session.expiresAt ? { role: 'trial', expiresAt: session.expiresAt, token } : null;
   // 승인이 취소되거나 계정이 지워지면 바로 못 쓰게, 매번 계정 상태를 확인한다.
   const user = await env.DB.get(userKey(session.username), 'json');
   if (user?.status === 'blocked') info.blockedUser = user;
@@ -395,6 +396,30 @@ async function updateMessage(request, env) {
   return json({ ok: true });
 }
 
+// 체험하기: 가입·로그인 없이 1시간 동안 쓸 수 있다. 한 브라우저에서 하루에 한 번만 (쿠키로 기억),
+// 쿠키를 지워 가며 계속 쓰는 걸 줄이려고 한 연결(IP)당 1시간에 30번까지. 학교처럼 여럿이 같은 IP 를 쓸 수 있어서 넉넉하게 잡았다.
+const TRIAL_TTL = 60 * 60;
+const TRIAL_COOLDOWN = 60 * 60 * 24;
+const TRIAL_COOKIE = 'sy_trial';
+const TRIAL_PER_HOUR_PER_IP = 30;
+
+async function startTrial(request, env) {
+  if (await getSession(request, env)) return fail('이미 로그인돼 있어요.', 400, 'ALREADY');
+  if (getCookie(request, TRIAL_COOKIE)) return fail('체험은 하루에 한 번만 할 수 있어요. 계속 쓰려면 가입해 주세요.', 429, 'TRIAL_USED');
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const limitKey = `rl:trial:${ip}`;
+  const count = Number(await env.DB.get(limitKey)) || 0;
+  if (count >= TRIAL_PER_HOUR_PER_IP) return fail('지금은 체험을 시작할 수 없어요. 잠시 뒤에 다시 해 보거나 가입해 주세요.', 429, 'RATE_LIMIT');
+  await env.DB.put(limitKey, String(count + 1), { expirationTtl: 3600 });
+
+  const expiresAt = Date.now() + TRIAL_TTL * 1000;
+  const token = await createSession(env, { role: 'trial', expiresAt }, TRIAL_TTL);
+  const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  headers.append('Set-Cookie', sessionCookie(token, TRIAL_TTL));
+  headers.append('Set-Cookie', `${TRIAL_COOKIE}=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${TRIAL_COOLDOWN}`);
+  return new Response(JSON.stringify({ username: '체험', name: '', role: 'trial', expiresAt, mustChange: false }), { status: 200, headers });
+}
+
 async function logout(request, env) {
   const session = await getSession(request, env);
   if (session) await env.DB.delete(`session:${session.token}`);
@@ -406,6 +431,7 @@ async function me(request, env) {
   const session = await getSession(request, env, info);
   if (info.blockedUser) return blockDevice(request, env, info.blockedUser);
   if (!session) return fail('로그인이 필요해요.', 401, 'LOGIN_REQUIRED');
+  if (session.role === 'trial') return json({ username: '체험', name: '', role: 'trial', expiresAt: session.expiresAt, mustChange: false });
   return json({ username: session.username || '관리자', name: session.name || '', role: session.role, mustChange: !!session.mustChange });
 }
 
@@ -484,6 +510,7 @@ export async function handleAuth(request, env) {
   if (pathname === '/api/auth/signup' && method === 'POST') return signup(request, env);
   if (pathname === '/api/auth/login' && method === 'POST') return login(request, env);
   if (pathname === '/api/auth/logout' && method === 'POST') return logout(request, env);
+  if (pathname === '/api/auth/trial' && method === 'POST') return startTrial(request, env);
   if (pathname === '/api/auth/password' && method === 'POST') return changePassword(request, env);
   if (pathname === '/api/auth/contact' && method === 'POST') return contact(request, env);
   if (pathname === '/api/auth/contact/replies' && method === 'POST') return contactReplies(request, env);

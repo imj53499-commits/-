@@ -20,7 +20,10 @@
       <button class="icon-btn" id="menuBtn" aria-label="메뉴">
         <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
       </button>
-      <a href="#/" class="logo" aria-label="School YouTube 홈">
+      <a href="#/" class="icon-btn apps-btn" id="appsBtn" aria-label="앱 목록" title="앱 목록">
+        <svg viewBox="0 0 24 24"><circle cx="5" cy="5" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="12" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/></svg>
+      </a>
+      <a href="#/youtube" class="logo" aria-label="School YouTube 홈">
         <span class="logo-mark"><svg viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z"/></svg></span>
         <span class="logo-text">School YouTube</span>
       </a>
@@ -57,7 +60,7 @@
   </header>
 
   <nav class="sidebar" id="sidebar">
-    <a href="#/" data-nav="home">
+    <a href="#/youtube" data-nav="home">
       <svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg><span>홈</span>
     </a>
     <a href="#/shorts" data-nav="shorts">
@@ -78,6 +81,7 @@
   </nav>
 
   <main id="app" class="content"></main>
+  <a id="trialBar" class="trial-bar" href="#/signup" hidden></a>
 
   <dialog id="settingsDialog" class="settings">
     <div id="accountSection" class="account-section" hidden>
