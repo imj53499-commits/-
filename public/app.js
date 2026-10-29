@@ -1561,8 +1561,8 @@ function listenToPlayer(iframe) {
   autostart(iframe, () => (cover.hidden ? playerState : PAUSED), iframe.parentElement);
 }
 
-function playerCommand(func) {
-  sendToPlayer(document.querySelector('iframe[data-player]'), func);
+function playerCommand(func, args) {
+  sendToPlayer(document.querySelector('iframe[data-player]'), func, args);
 }
 
 window.addEventListener('message', (e) => {
@@ -1589,6 +1589,8 @@ let lastSaved = 0;
 
 function saveWatching(force) {
   if (!watching || playerState === ENDED || !(playerTime > 0)) return;
+  // 팝업에서 같은 영상을 보는 동안은 팝업이 위치를 저장한다 (멈춰 둔 이 화면의 예전 위치로 덮어쓰지 않게)
+  if (popupFor === watching.id) return;
   if (!force && Date.now() - lastSaved < 5000) return;
   lastSaved = Date.now();
   saveProgress(watching.id, playerTime, playerDuration, watching.meta);
@@ -1643,7 +1645,7 @@ async function openPopup(id, start = Math.floor(playerTime || 0)) {
     try {
       if (popupWin !== window.documentPictureInPicture.window) closePopup(); // 일반 팝업이 떠 있었으면 닫기
       popupWin = await openPinnedPopup(url, width, height);
-      playerCommand('pauseVideo');
+      handOffToPopup(id);
       return;
     } catch (err) {
       // 막히면 아래 일반 팝업으로
@@ -1659,7 +1661,7 @@ async function openPopup(id, start = Math.floor(playerTime || 0)) {
     return;
   }
   popupWin = win;
-  playerCommand('pauseVideo');
+  handOffToPopup(id);
   showToast(`${why}. 일반 팝업으로 열어서 다른 창을 누르면 뒤로 갈 수 있어요.`);
 }
 
@@ -1669,6 +1671,35 @@ function showToast(text) {
   const toast = el('div', { class: 'toast', role: 'status', text });
   document.body.append(toast);
   setTimeout(() => toast.remove(), 7000);
+}
+
+// 팝업이 열려 있는 동안 보는 영상 (그 영상의 이어보기 위치는 팝업이 저장한다)
+let popupFor = null;
+let popupWatch = null;
+
+function handOffToPopup(id) {
+  saveWatching(true); // 여기서 보던 위치를 먼저 저장하고
+  playerCommand('pauseVideo');
+  popupFor = id;
+  clearInterval(popupWatch);
+  popupWatch = setInterval(() => {
+    if (popupWin && !popupWin.closed) return;
+    clearInterval(popupWatch);
+    popupWatch = null;
+    popupReturned();
+  }, 700);
+}
+
+// 팝업을 닫으면 이 화면의 플레이어를 팝업에서 본 위치로 옮긴다 (재생은 직접 누를 때까지 멈춰 둠)
+function popupReturned() {
+  const id = popupFor;
+  popupFor = null;
+  popupWin = null;
+  if (!id || watching?.id !== id) return;
+  const t = resumeTime(id);
+  playerTime = t;
+  playerCommand('seekTo', [t, true]);
+  playerCommand('pauseVideo');
 }
 
 function closePopup() {
