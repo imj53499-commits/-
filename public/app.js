@@ -40,7 +40,7 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
-// 차단된 계정이면 로그인 화면에 그 안내를 띄운다.
+// 차단된 계정·기기면 서버가 알려 준 안내를 담아 두고 차단 화면만 보여 준다.
 let blockedNotice = '';
 
 const NETWORK_ERROR = '서버에 연결하지 못했어요. 인터넷(와이파이)이 끊겼거나 학교·회사 인터넷이 이 주소를 막았을 수 있어요. 잠시 뒤 다시 해 보거나 다른 인터넷(데이터)으로 해 보세요.';
@@ -720,6 +720,7 @@ function route() {
   document.body.classList.toggle('auth-mode', !me || !!me.mustChange);
   if (parts[0] === 'contact') return renderContact(token);
   if (parts[0] === 'replies') return renderReplies(token);
+  if (blockedNotice) return renderBlocked();
   if (!me) return renderAuth(token);
   if (me.mustChange) return renderPassword(token, true);
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
@@ -765,6 +766,19 @@ function authCard(title, subtitle, ...children) {
         el('h1', { class: 'auth-title', text: title }),
         subtitle ? el('p', { class: 'auth-subtitle', text: subtitle }) : null),
       ...children));
+}
+
+// 차단된 계정·기기: 로그인 화면 대신 이 화면만 보인다 (문의하기는 됨)
+function renderBlocked() {
+  setTitle();
+  setActiveNav('');
+  document.body.classList.add('auth-mode');
+  app.replaceChildren(authCard('접속이 차단됐어요', '이 기기에서는 사이트를 쓸 수 없어요',
+    el('div', { class: 'auth-form' },
+      el('p', { class: 'auth-message blocked', role: 'alert', text: blockedNotice }),
+      el('button', { type: 'button', class: 'auth-submit', onclick: () => location.reload() }, el('span', { text: '다시 확인' })),
+      el('p', { class: 'auth-foot', text: '관리자가 차단을 풀면 다시 확인을 눌러 주세요' }),
+      el('a', { class: 'auth-link', href: '#/contact', text: '잘못 막혔나요? 관리자에게 문의하기' }))));
 }
 
 // 입력칸: 왼쪽 아이콘 + 입력 + (비밀번호면 보기 버튼) + 아래 안내 문구
@@ -819,9 +833,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
     autocomplete: signup ? 'new-password' : 'current-password', placeholder: signup ? '6자 이상' : '비밀번호'
   });
-  const message = notice
-    ? el('p', { class: 'auth-message ok', text: notice, role: 'alert' })
-    : el('p', { class: `auth-message${blockedNotice ? ' blocked' : ''}`, text: blockedNotice, role: 'alert' });
+  const message = el('p', { class: `auth-message${notice ? ' ok' : ''}`, text: notice, role: 'alert' });
   const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: signup ? '가입 신청하기' : '로그인' }));
   const tab = (key, label) => el('button', {
     type: 'button', class: `auth-tab${mode === key ? ' active' : ''}`, text: label, 'aria-pressed': String(mode === key),
@@ -873,11 +885,11 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
         return;
       }
       me = await api('/api/auth/login', { method: 'POST', body });
-      blockedNotice = '';
       route();
     } catch (err) {
+      if (err.code === 'BLOCKED') return route();
       message.textContent = err.message;
-      message.className = err.code === 'PENDING' ? 'auth-message wait' : err.code === 'BLOCKED' ? 'auth-message blocked' : 'auth-message';
+      message.className = err.code === 'PENDING' ? 'auth-message wait' : 'auth-message';
       submit.disabled = false;
       submit.classList.remove('loading');
     }
@@ -1125,6 +1137,7 @@ async function renderAdmin(token) {
       submit.disabled = true;
       try {
         me = await api('/api/admin/login', { method: 'POST', body: { password: password.value } });
+        blockedNotice = ''; // 관리자가 로그인하면 이 기기의 차단도 풀린다
         route();
       } catch (err) {
         message.textContent = err.message;
@@ -1161,7 +1174,7 @@ async function renderAdmin(token) {
     if (action === 'delete' && !confirm(`${user.name || user.username}님의 계정을 삭제할까요?`)) return;
     let reason = '';
     if (action === 'block') {
-      reason = prompt(`${user.name || user.username}님을 차단할까요?\n바로 로그아웃되고 다시 로그인할 수 없어요. 그 브라우저에서는 새로 가입도 안 돼요.\n\n차단 이유 (본인에게 보여요, 비워 둬도 돼요)`, '');
+      reason = prompt(`${user.name || user.username}님을 차단할까요?\n바로 로그아웃되고 다시 로그인할 수 없어요. 쓰던 기기와 이 계정으로 로그인을 시도한 기기는 30일 동안 사이트 전체가 막혀요.\n\n차단 이유 (본인에게 보여요, 비워 둬도 돼요)`, '');
       if (reason === null) return;
     }
     row.querySelectorAll('button').forEach((b) => (b.disabled = true));

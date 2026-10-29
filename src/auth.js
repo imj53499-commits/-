@@ -76,22 +76,58 @@ function sessionCookie(token, maxAge) {
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
-// 차단된 계정이 쓰던 브라우저에 남기는 표시. 이 표시가 있으면 그 브라우저에서는 새로 가입할 수 없다.
-// (공용 컴퓨터일 수도 있어서 로그인까지 막지는 않고, 30일 뒤에 사라진다)
-const BLOCKED_COOKIE = 'sy_blocked';
-const BLOCKED_COOKIE_TTL = 60 * 60 * 24 * 30;
-const blockedCookie = () => `${BLOCKED_COOKIE}=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${BLOCKED_COOKIE_TTL}`;
+// 기기 차단: 차단된 계정으로 쓰던 브라우저나, 차단된 계정으로 로그인을 시도한(비밀번호까지 맞게) 브라우저에
+// 기기 번호 쿠키를 남기고 KV 에 blockdev:<번호> 로 적어 둔다. 그 브라우저는 30일 동안 사이트 전체를 못 쓴다
+// (문의하기만 됨). 관리자가 그 계정의 차단을 풀면 그 계정 때문에 막힌 기기도 같이 풀린다.
+const DEVICE_COOKIE = 'sy_device';
+const DEVICE_BLOCK_TTL = 60 * 60 * 24 * 30;
+const deviceCookie = (id, maxAge) => `${DEVICE_COOKIE}=${id}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+const deviceKey = (id) => `blockdev:${id}`;
 
 function blockedMessage(user) {
-  return user.blockReason ? `관리자가 이 계정을 차단했어요.\n이유: ${user.blockReason}` : '관리자가 이 계정을 차단했어요.';
+  const base = '관리자가 이 계정과 이 기기의 접속을 차단했어요.';
+  return user?.blockReason ? `${base}\n이유: ${user.blockReason}` : base;
 }
 
-// 차단된 계정의 요청에 돌려줄 응답: 로그인을 지우고 브라우저에 차단 표시를 남긴다.
-export function blockedResponse(info) {
+function blockedJson(message, setCookies) {
   const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-  headers.append('Set-Cookie', blockedCookie());
-  headers.append('Set-Cookie', sessionCookie('', 0));
-  return new Response(JSON.stringify({ error: info.blocked, code: 'BLOCKED' }), { status: 403, headers });
+  for (const c of setCookies) headers.append('Set-Cookie', c);
+  return new Response(JSON.stringify({ error: message, code: 'BLOCKED' }), { status: 403, headers });
+}
+
+// 이 브라우저를 차단 기기로 적어 두고, 로그인은 지운다.
+export async function blockDevice(request, env, user) {
+  const old = getCookie(request, DEVICE_COOKIE);
+  const id = /^[0-9a-f]{32}$/.test(old) ? old : randomHex(16);
+  await env.DB.put(deviceKey(id), JSON.stringify({ username: user.username, at: Date.now() }),
+    { expirationTtl: DEVICE_BLOCK_TTL, metadata: { username: user.username } });
+  return blockedJson(blockedMessage(user), [deviceCookie(id, DEVICE_BLOCK_TTL), sessionCookie('', 0)]);
+}
+
+// 이 브라우저가 차단된 기기면 차단 응답을, 아니면 null 을 돌려준다.
+export async function deviceBlockResponse(request, env) {
+  const id = getCookie(request, DEVICE_COOKIE);
+  if (!/^[0-9a-f]{32}$/.test(id)) return null;
+  const mark = await env.DB.get(deviceKey(id), 'json');
+  if (!mark) return null;
+  const user = await env.DB.get(userKey(mark.username), 'json');
+  // 차단이 풀린 계정 때문에 남아 있던 표시는 지운다 (계정을 삭제했으면 차단은 그대로 둔다)
+  if (user && user.status !== 'blocked') {
+    await env.DB.delete(deviceKey(id));
+    return null;
+  }
+  return blockedJson(blockedMessage(user), [sessionCookie('', 0)]);
+}
+
+async function unblockDevices(env, username) {
+  let cursor;
+  do {
+    const page = await env.DB.list({ prefix: 'blockdev:', cursor });
+    for (const key of page.keys) {
+      if (key.metadata?.username?.toLowerCase() === username.toLowerCase()) await env.DB.delete(key.name);
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
 }
 
 // 다른 사이트에서 폼으로 몰래 요청을 보내지 못하게 JSON 요청만 받는다.
@@ -153,7 +189,7 @@ async function createSession(env, data, ttl) {
 
 // ---------- 세션 확인 (다른 API 에서 사용) ----------
 
-// info 를 넘기면 차단된 계정일 때 info.blocked 에 안내 문구를 넣어 준다.
+// info 를 넘기면 차단된 계정일 때 info.blockedUser 에 그 계정을 넣어 준다.
 export async function getSession(request, env, info = {}) {
   const token = getCookie(request, SESSION_COOKIE);
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
@@ -162,7 +198,7 @@ export async function getSession(request, env, info = {}) {
   if (session.role === 'admin') return { role: 'admin', token };
   // 승인이 취소되거나 계정이 지워지면 바로 못 쓰게, 매번 계정 상태를 확인한다.
   const user = await env.DB.get(userKey(session.username), 'json');
-  if (user?.status === 'blocked') info.blocked = blockedMessage(user);
+  if (user?.status === 'blocked') info.blockedUser = user;
   if (!user || user.status !== 'approved') return null;
   // 비밀번호가 바뀌었으면(초기화 포함) 예전 로그인은 풀린다.
   if ((session.pwv || 0) !== (user.pwv || 0)) return null;
@@ -176,7 +212,6 @@ async function signup(request, env) {
   const username = String(body?.username ?? '').trim();
   const password = String(body?.password ?? '');
   const name = String(body?.name ?? '').trim().replace(/\s+/g, ' ');
-  if (getCookie(request, BLOCKED_COOKIE)) return fail('차단된 계정을 쓰던 브라우저라 새로 가입할 수 없어요. 관리자에게 문의해 주세요.', 403, 'BLOCKED');
   if (!REAL_NAME.test(name)) return fail('이름을 1~20자로 적어 주세요. (글자와 띄어쓰기만)', 400);
   if (!USERNAME.test(username)) return fail('아이디는 한글, 영문, 숫자, _ 로 2~20자로 정해 주세요.', 400);
   if (password.length < 6 || password.length > 100) return fail('비밀번호는 6자 이상으로 정해 주세요.', 400);
@@ -200,7 +235,7 @@ async function login(request, env) {
   if (user.mustChange && user.tempExpires && Date.now() > user.tempExpires) {
     return fail('임시 비밀번호가 만료됐어요. 관리자에게 다시 문의해 주세요.', 401, 'TEMP_EXPIRED');
   }
-  if (user.status === 'blocked') return blockedResponse({ blocked: blockedMessage(user) });
+  if (user.status === 'blocked') return blockDevice(request, env, user);
   if (user.status === 'pending') return fail('아직 관리자 승인을 기다리고 있어요.', 403, 'PENDING');
   if (user.status !== 'approved') return fail('가입이 승인되지 않았어요.', 403, 'REJECTED');
 
@@ -333,7 +368,7 @@ async function logout(request, env) {
 async function me(request, env) {
   const info = {};
   const session = await getSession(request, env, info);
-  if (info.blocked) return blockedResponse(info);
+  if (info.blockedUser) return blockDevice(request, env, info.blockedUser);
   if (!session) return fail('로그인이 필요해요.', 401, 'LOGIN_REQUIRED');
   return json({ username: session.username || '관리자', name: session.name || '', role: session.role, mustChange: !!session.mustChange });
 }
@@ -345,7 +380,13 @@ async function adminLogin(request, env) {
   const ok = safeEqual(await sha256Hex(String(body?.password ?? '')), await sha256Hex(env.ADMIN_PASSWORD));
   if (!ok) return fail('관리자 비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
   const token = await createSession(env, { role: 'admin' }, ADMIN_SESSION_TTL);
-  return json({ username: '관리자', role: 'admin' }, 200, { 'Set-Cookie': sessionCookie(token, ADMIN_SESSION_TTL) });
+  // 관리자가 로그인한 기기는 차단 표시를 지운다 (공용 컴퓨터가 잘못 막혔을 때 풀 수 있게)
+  const device = getCookie(request, DEVICE_COOKIE);
+  if (/^[0-9a-f]{32}$/.test(device)) await env.DB.delete(deviceKey(device));
+  const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  headers.append('Set-Cookie', sessionCookie(token, ADMIN_SESSION_TTL));
+  headers.append('Set-Cookie', deviceCookie('', 0));
+  return new Response(JSON.stringify({ username: '관리자', role: 'admin' }), { status: 200, headers });
 }
 
 async function listUsers(env) {
@@ -390,6 +431,7 @@ async function updateUser(request, env) {
   user.status = status;
   if (status === 'blocked') user.blockReason = cleanText(body?.reason, 100);
   else delete user.blockReason;
+  if (action === 'unblock') await unblockDevices(env, user.username);
   await putUser(env, user);
   return json({ ok: true, status });
 }

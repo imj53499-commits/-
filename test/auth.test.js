@@ -298,7 +298,9 @@ test('아이디가 없는 문의는 초기화해서 보낼 수 없고, 그냥 �
   assert.equal(got.reply.text, '오늘 안에 승인할게요');
 });
 
-test('차단: 바로 로그아웃되고, 다시 로그인 못 하고, 그 브라우저에서는 새로 가입도 못 한다', async () => {
+const deviceOf = (setCookie) => /sy_device=([0-9a-f]{32})/.exec(setCookie || '')?.[1];
+
+test('차단: 바로 튕기고, 쓰던 기기는 사이트 전체가 막히고, 문의하기만 된다', async () => {
   await signup('민수');
   const a = await adminLogin();
   await admin('approve', '민수', a.cookie);
@@ -310,28 +312,73 @@ test('차단: 바로 로그아웃되고, 다시 로그인 못 하고, 그 브라
   const list = await call('/api/admin/users', { cookie: a.cookie });
   assert.deepEqual(list.body.map((u) => [u.status, u.blockReason]), [['blocked', '욕설']]);
 
-  // 쓰던 로그인은 바로 막히고, 차단 이유가 보이고, 브라우저에 차단 표시가 남는다
+  // 쓰던 로그인은 바로 막히고, 차단 이유가 보이고, 그 기기에 차단 표시가 남는다
   const kicked = await call('/api/search?q=x', { cookie: user.cookie });
   assert.equal(kicked.status, 403);
   assert.equal(kicked.body.code, 'BLOCKED');
   assert.match(kicked.body.error, /이유: 욕설/);
-  assert.match(kicked.setCookie, /sy_blocked=1/);
-  assert.equal((await call('/api/auth/me', { cookie: user.cookie })).body.code, 'BLOCKED');
+  const device = deviceOf(kicked.setCookie);
+  assert.ok(device);
+  assert.match(kicked.setCookie, /sy_session=;/);
 
-  const again = await login('민수');
-  assert.equal(again.status, 403);
-  assert.equal(again.body.code, 'BLOCKED');
-  // 비밀번호가 틀리면 차단 여부를 알려 주지 않는다
-  assert.equal((await login('민수', 'wrong-pass')).body.code, 'BAD_LOGIN');
+  // 그 기기는 로그아웃 상태여도 다른 계정 가입·로그인·영상 모두 막힌다
+  const dev = `sy_device=${device}`;
+  await signup('지수');
+  await admin('approve', '지수', a.cookie);
+  for (const res of [
+    await call('/api/auth/me', { cookie: dev }),
+    await call('/api/search?q=x', { cookie: dev }),
+    await call('/api/auth/login', { method: 'POST', body: { username: '지수', password: 'pass1234' }, cookie: dev }),
+    await call('/api/auth/signup', { method: 'POST', body: { username: '민수2', password: 'pass1234', name: '홍길동' }, cookie: dev })
+  ]) {
+    assert.equal(res.status, 403);
+    assert.equal(res.body.code, 'BLOCKED');
+  }
+  // 문의하기는 된다
+  assert.equal((await call('/api/auth/contact', { method: 'POST', body: { name: '김민수', message: '공용 컴퓨터인데 잘못 막혔어요' }, cookie: dev })).status, 201);
 
-  const newAccount = await call('/api/auth/signup', { method: 'POST', body: { username: '민수2', password: 'pass1234', name: '홍길동' }, cookie: 'sy_blocked=1' });
-  assert.equal(newAccount.status, 403);
-  assert.equal(newAccount.body.code, 'BLOCKED');
-
-  // 차단을 풀면 다시 로그인되고 이유는 지워진다
+  // 차단을 풀면 그 계정 때문에 막힌 기기도 풀린다
   assert.equal((await admin('unblock', '민수', a.cookie)).body.status, 'approved');
+  assert.equal((await call('/api/auth/me', { cookie: dev })).body.code, 'LOGIN_REQUIRED');
   assert.equal((await login('민수')).status, 200);
-  assert.equal((await call('/api/admin/users', { cookie: a.cookie })).body[0].blockReason, '');
+  assert.equal((await call('/api/admin/users', { cookie: a.cookie })).body.find((u) => u.username === '민수').blockReason, '');
+});
+
+test('차단된 계정으로 다른 기기에서 로그인을 시도하면 그 기기도 막힌다 (비밀번호가 맞을 때만)', async () => {
+  await signup('민수');
+  const a = await adminLogin();
+  await admin('block', '민수', a.cookie);
+
+  // 비밀번호가 틀리면 차단 여부도 알려 주지 않고 기기도 막지 않는다
+  const wrong = await login('민수', 'wrong-pass');
+  assert.equal(wrong.body.code, 'BAD_LOGIN');
+  assert.equal(deviceOf(wrong.setCookie), undefined);
+
+  const attempt = await login('민수');
+  assert.equal(attempt.status, 403);
+  assert.equal(attempt.body.code, 'BLOCKED');
+  const device = deviceOf(attempt.setCookie);
+  assert.ok(device);
+  assert.equal((await call('/api/home', { cookie: `sy_device=${device}` })).body.code, 'BLOCKED');
+
+  // 같은 기기에서 다시 시도해도 기기 번호는 그대로
+  const again = await call('/api/admin/login', { method: 'POST', body: { password: 'nope' }, cookie: `sy_device=${device}` });
+  assert.equal(again.status, 401);
+
+  // 관리자가 그 기기에서 로그인하면 기기 차단이 풀린다 (공용 컴퓨터용)
+  const adminHere = await call('/api/admin/login', { method: 'POST', body: { password: 'admin-secret' }, cookie: `sy_device=${device}` });
+  assert.equal(adminHere.status, 200);
+  assert.equal((await call('/api/auth/me', { cookie: `sy_device=${device}` })).body.code, 'LOGIN_REQUIRED');
+});
+
+test('계정을 지워도 그 계정 때문에 막힌 기기는 그대로 막혀 있다', async () => {
+  await signup('민수');
+  const a = await adminLogin();
+  await admin('block', '민수', a.cookie);
+  const device = deviceOf((await login('민수')).setCookie);
+  await admin('delete', '민수', a.cookie);
+  const res = await call('/api/search?q=x', { cookie: `sy_device=${device}` });
+  assert.equal(res.body.code, 'BLOCKED');
 });
 
 test('차단은 관리자만', async () => {
