@@ -5,7 +5,8 @@
 //   user:<아이디(소문자)>   → { username, name, salt, hash, status, createdAt, pwv, mustChange }
 //                              (metadata 에 username, name, status, createdAt)
 //   session:<토큰>          → { role: 'user' | 'admin', username?, pwv? }    (만료 시간 있음)
-//   msg:<시각>-<임의값>      → 관리자에게 보낸 문의 { id, name, username, contact, message, at, read }
+//   msg:<시각>-<임의값>      → 관리자에게 보낸 문의 { id, name, username, contact, message, at, read, hasTicket, reply? }
+//   ticket:<표의 해시>       → 문의 id. 문의한 브라우저만 가진 '답장 받기 표'로 관리자 답장을 볼 수 있다 (30일)
 //   rl:contact:<IP>         → 1시간 동안 보낸 문의 수 (스팸 막기)
 //
 // pwv(비밀번호 버전): 비밀번호를 바꾸거나 초기화하면 1 올라가고, 예전 버전으로 만든 로그인은 모두 풀린다.
@@ -102,6 +103,19 @@ async function setPassword(user, password) {
   user.pwv = (user.pwv || 0) + 1;
 }
 
+const TEMP_PASSWORD_TTL = 24 * 60 * 60 * 1000; // 임시 비밀번호는 24시간 안에 써야 한다
+const TICKET_TTL = 60 * 60 * 24 * 30;
+
+// 비밀번호를 임시 비밀번호로 바꾸고(예전 로그인은 풀림) 그 임시 비밀번호를 돌려준다.
+async function resetToTemp(env, user) {
+  const temp = tempPassword();
+  await setPassword(user, temp);
+  user.mustChange = true;
+  user.tempExpires = Date.now() + TEMP_PASSWORD_TTL;
+  await putUser(env, user);
+  return temp;
+}
+
 // 헷갈리는 글자(0 O 1 l I)를 뺀 8자 임시 비밀번호
 function tempPassword() {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -162,6 +176,9 @@ async function login(request, env) {
   // 아이디가 없을 때도 똑같이 계산해서, 응답 시간으로 아이디 존재 여부를 알 수 없게 한다.
   const hash = await hashPassword(password, user?.salt || 'no-user');
   if (!user || !safeEqual(hash, user.hash)) return fail('아이디 또는 비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
+  if (user.mustChange && user.tempExpires && Date.now() > user.tempExpires) {
+    return fail('임시 비밀번호가 만료됐어요. 관리자에게 다시 문의해 주세요.', 401, 'TEMP_EXPIRED');
+  }
   if (user.status === 'pending') return fail('아직 관리자 승인을 기다리고 있어요.', 403, 'PENDING');
   if (user.status !== 'approved') return fail('가입이 승인되지 않았어요.', 403, 'REJECTED');
 
@@ -183,6 +200,7 @@ async function changePassword(request, env) {
   if (next === current) return fail('지금과 다른 비밀번호로 정해 주세요.', 400);
   await setPassword(user, next);
   user.mustChange = false;
+  delete user.tempExpires;
   await putUser(env, user);
   // 다른 기기의 로그인은 풀리고, 지금 기기는 새로 로그인된 상태로 둔다.
   await env.DB.delete(`session:${session.token}`);
@@ -213,10 +231,26 @@ async function contact(request, env) {
 
   const at = Date.now();
   const id = `${at}-${randomHex(4)}`;
-  await env.DB.put(`msg:${id}`, JSON.stringify({ id, name, username, contact: contactInfo, message, at, read: false }),
+  // 답장 받기 표: 보낸 브라우저에만 돌려주고, 서버에는 해시만 둔다.
+  const ticket = randomHex(16);
+  await env.DB.put(`msg:${id}`, JSON.stringify({ id, name, username, contact: contactInfo, message, at, read: false, hasTicket: true }),
     { metadata: { at, read: false } });
+  await env.DB.put(`ticket:${await sha256Hex(ticket)}`, id, { expirationTtl: TICKET_TTL });
   await env.DB.put(limitKey, String(sent + 1), { expirationTtl: 3600 });
-  return json({ ok: true }, 201);
+  return json({ ok: true, ticket }, 201);
+}
+
+// 문의한 브라우저가 가진 표들로 관리자 답장을 확인한다 (POST 로 받아서 주소에 표가 남지 않게).
+async function contactReplies(request, env) {
+  const body = await readJson(request);
+  const tickets = (Array.isArray(body?.tickets) ? body.tickets : []).filter((t) => /^[0-9a-f]{32}$/.test(t)).slice(0, 10);
+  const out = await Promise.all(tickets.map(async (ticket) => {
+    const id = await env.DB.get(`ticket:${await sha256Hex(ticket)}`);
+    const msg = id && await env.DB.get(`msg:${id}`, 'json');
+    if (!msg) return { ticket, gone: true };
+    return { ticket, at: msg.at, message: msg.message.slice(0, 200), reply: msg.reply || null };
+  }));
+  return json(out);
 }
 
 async function listMessages(env) {
@@ -243,6 +277,25 @@ async function updateMessage(request, env) {
   }
   const msg = await env.DB.get(key, 'json');
   if (!msg) return fail('없는 문의예요.', 404);
+
+  // 답장: 문의한 브라우저에서 볼 수 있다. resetPassword 면 그 아이디의 비밀번호를 초기화해서 임시 비밀번호를 같이 보낸다.
+  if (body?.action === 'reply') {
+    if (!msg.hasTicket) return fail('예전 방식으로 받은 문의라 답장을 보낼 수 없어요.', 400);
+    let text = cleanText(body.reply, 1000);
+    let temp = null;
+    if (body.resetPassword) {
+      const user = msg.username && await env.DB.get(userKey(msg.username), 'json');
+      if (!user) return fail('문의에 적힌 아이디의 계정이 없어요.', 404);
+      temp = await resetToTemp(env, user);
+      text = `${text ? `${text}\n\n` : ''}임시 비밀번호: ${temp}\n이 비밀번호로 24시간 안에 로그인하면 새 비밀번호를 정하게 돼요.`;
+    }
+    if (!text) return fail('답장 내용을 적어 주세요.', 400);
+    msg.reply = { text, at: Date.now() };
+    msg.read = true;
+    await env.DB.put(key, JSON.stringify(msg), { metadata: { at: msg.at, read: true } });
+    return json({ ok: true, reply: msg.reply, tempPassword: temp });
+  }
+
   if (body?.action !== 'read' && body?.action !== 'unread') return fail('잘못된 요청', 400);
   msg.read = body.action === 'read';
   await env.DB.put(key, JSON.stringify(msg), { metadata: { at: msg.at, read: msg.read } });
@@ -304,11 +357,7 @@ async function updateUser(request, env) {
   // 비밀번호 초기화: 원래 비밀번호는 아무도 볼 수 없어서, 임시 비밀번호를 만들어 관리자에게 한 번만 보여 준다.
   // 그 사람은 임시 비밀번호로 로그인하면 바로 새 비밀번호를 정해야 하고, 예전 로그인은 모두 풀린다.
   if (action === 'reset') {
-    const temp = tempPassword();
-    await setPassword(user, temp);
-    user.mustChange = true;
-    await putUser(env, user);
-    return json({ ok: true, tempPassword: temp });
+    return json({ ok: true, tempPassword: await resetToTemp(env, user) });
   }
   const status = { approve: 'approved', reject: 'rejected', pending: 'pending' }[action];
   if (!STATUSES.includes(status)) return fail('잘못된 요청', 400);
@@ -327,6 +376,7 @@ export async function handleAuth(request, env) {
   if (pathname === '/api/auth/logout' && method === 'POST') return logout(request, env);
   if (pathname === '/api/auth/password' && method === 'POST') return changePassword(request, env);
   if (pathname === '/api/auth/contact' && method === 'POST') return contact(request, env);
+  if (pathname === '/api/auth/contact/replies' && method === 'POST') return contactReplies(request, env);
   if (pathname === '/api/admin/login' && method === 'POST') return adminLogin(request, env);
 
   if (pathname.startsWith('/api/admin/')) {

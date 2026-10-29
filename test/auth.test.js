@@ -239,3 +239,61 @@ test('비밀번호 바꾸기는 로그인해야 하고, 관리자 초기화는 �
   const u = await login('park');
   assert.equal((await admin('reset', 'park', u.cookie)).status, 401);
 });
+
+test('문의 답장: 보낸 브라우저의 표로만 보이고, 초기화해서 보내면 임시 비밀번호가 답장에 들어간다', async () => {
+  await signup('choi', 'oldpass1', '최지우');
+  const a = await adminLogin();
+  await admin('approve', 'choi', a.cookie);
+
+  const sent = await call('/api/auth/contact', { method: 'POST', body: { name: '최지우', username: 'choi', message: '비밀번호를 잊었어요' } });
+  const ticket = sent.body.ticket;
+  assert.match(ticket, /^[0-9a-f]{32}$/);
+  assert.ok(!JSON.stringify([...env.DB.store.entries()]).includes(ticket)); // 표 자체는 서버에 없다
+
+  const replies = (tickets) => call('/api/auth/contact/replies', { method: 'POST', body: { tickets } });
+  assert.equal((await replies([ticket])).body[0].reply, null); // 아직 답장 없음
+  assert.equal((await replies(['0'.repeat(32)])).body[0].gone, true); // 남의 표는 아무것도 안 보인다
+
+  const msg = (await call('/api/admin/messages', { cookie: a.cookie })).body[0];
+  const reply = (body) => call('/api/admin/messages', { method: 'POST', body: { id: msg.id, action: 'reply', ...body }, cookie: a.cookie });
+  assert.equal((await reply({ reply: '' })).status, 400);
+  assert.equal((await call('/api/admin/messages', { method: 'POST', body: { id: msg.id, action: 'reply', reply: 'x' } })).status, 401); // 관리자만
+
+  const done = await reply({ reply: '본인 확인했어요.', resetPassword: true });
+  assert.equal(done.status, 200);
+  const temp = done.body.tempPassword;
+  assert.match(temp, /^[a-z2-9]{8}$/);
+
+  const got = (await replies([ticket])).body[0];
+  assert.ok(got.reply.text.startsWith('본인 확인했어요.'));
+  assert.ok(got.reply.text.includes(`임시 비밀번호: ${temp}`));
+  assert.equal((await login('choi', 'oldpass1')).status, 401);
+  const tempLogin = await login('choi', temp);
+  assert.equal(tempLogin.status, 200);
+  assert.equal(tempLogin.body.mustChange, true);
+});
+
+test('임시 비밀번호는 24시간이 지나면 못 쓴다', async () => {
+  await signup('jung');
+  const a = await adminLogin();
+  await admin('approve', 'jung', a.cookie);
+  const temp = (await admin('reset', 'jung', a.cookie)).body.tempPassword;
+  const stored = env.DB.store.get('user:jung');
+  const user = JSON.parse(stored.value);
+  user.tempExpires = Date.now() - 1000;
+  stored.value = JSON.stringify(user);
+  const res = await login('jung', temp);
+  assert.equal(res.status, 401);
+  assert.equal(res.body.code, 'TEMP_EXPIRED');
+});
+
+test('아이디가 없는 문의는 초기화해서 보낼 수 없고, 그냥 답장은 된다', async () => {
+  const sent = await call('/api/auth/contact', { method: 'POST', body: { name: '손님', message: '승인 언제 돼요?' } });
+  const a = await adminLogin();
+  const msg = (await call('/api/admin/messages', { cookie: a.cookie })).body[0];
+  const reset = await call('/api/admin/messages', { method: 'POST', body: { id: msg.id, action: 'reply', reply: '', resetPassword: true }, cookie: a.cookie });
+  assert.equal(reset.status, 404);
+  await call('/api/admin/messages', { method: 'POST', body: { id: msg.id, action: 'reply', reply: '오늘 안에 승인할게요' }, cookie: a.cookie });
+  const got = (await call('/api/auth/contact/replies', { method: 'POST', body: { tickets: [sent.body.ticket] } })).body[0];
+  assert.equal(got.reply.text, '오늘 안에 승인할게요');
+});

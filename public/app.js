@@ -705,6 +705,7 @@ function route() {
   if (parts[0] === 'admin') return renderAdmin(token);
   document.body.classList.toggle('auth-mode', !me || !!me.mustChange);
   if (parts[0] === 'contact') return renderContact(token);
+  if (parts[0] === 'replies') return renderReplies(token);
   if (!me) return renderAuth(token);
   if (me.mustChange) return renderPassword(token, true);
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
@@ -869,6 +870,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     el('div', { class: `auth-tabs${signup ? ' signup' : ''}` }, tab('login', '로그인'), tab('signup', '가입하기')),
     form));
   (signup ? realName : (prefill ? password : username)).focus();
+  showReplyBanner(token);
 }
 
 // 가입 신청을 마친 뒤 보여 주는 화면
@@ -928,14 +930,15 @@ function renderContact(token) {
     submit.disabled = true;
     submit.classList.add('loading');
     try {
-      await api('/api/auth/contact', { method: 'POST', body: {
+      const res = await api('/api/auth/contact', { method: 'POST', body: {
         name: name.value.trim(), username: username.value.trim(), contact: contactInfo.value.trim(), message: message.value
       } });
+      if (res.ticket) saveTickets([{ ticket: res.ticket, at: Date.now() }, ...loadTickets()]);
       if (token !== renderToken) return;
       app.replaceChildren(authCard('문의를 보냈어요', '',
         el('div', { class: 'auth-done' },
           icon('check', 'auth-done-badge'),
-          el('p', { class: 'auth-done-sub', text: '관리자가 확인하면 연락처로 답장하거나, 계정 문제를 해결해 줄 거예요.' }),
+          el('p', { class: 'auth-done-sub', text: '관리자가 답장하면 이 브라우저의 로그인 화면에 "답장이 왔어요"가 떠요. 다른 기기에서는 볼 수 없어요.' }),
           el('a', { class: 'auth-submit as-link', href: '#/' }, el('span', { text: '처음 화면으로' })))));
     } catch (err) {
       error.textContent = err.message;
@@ -946,6 +949,97 @@ function renderContact(token) {
 
   app.replaceChildren(authCard('관리자에게 문의', '비밀번호를 잊었거나 가입·승인이 안 될 때 남겨 주세요', form));
   (loggedIn ? message : name).focus();
+  showReplyBanner(token);
+}
+
+// ---------- 관리자 답장 받기 ----------
+// 문의를 보내면 이 브라우저에 '답장 받기 표'가 저장되고, 그 표로만 관리자 답장을 볼 수 있다.
+
+const TICKETS_KEY = 'contactTickets';
+
+function loadTickets() {
+  try {
+    const list = JSON.parse(localStorage.getItem(TICKETS_KEY) || '[]');
+    return Array.isArray(list) ? list.filter((t) => /^[0-9a-f]{32}$/.test(t?.ticket || '')).slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTickets(list) {
+  try { localStorage.setItem(TICKETS_KEY, JSON.stringify(list.slice(0, 10))); } catch {}
+}
+
+async function fetchReplies() {
+  const tickets = loadTickets();
+  if (!tickets.length) return [];
+  const list = await api('/api/auth/contact/replies', { method: 'POST', body: { tickets: tickets.map((t) => t.ticket) } });
+  // 지워졌거나 기간이 지난 문의의 표는 버린다
+  const gone = new Set(list.filter((r) => r.gone).map((r) => r.ticket));
+  if (gone.size) saveTickets(tickets.filter((t) => !gone.has(t.ticket)));
+  return list.filter((r) => !r.gone);
+}
+
+// 로그인·가입·문의 화면 카드 맨 위에 '답장이 왔어요' 띄우기
+async function showReplyBanner(token) {
+  if (!loadTickets().length) return;
+  let replies;
+  try { replies = await fetchReplies(); } catch { return; }
+  const answered = replies.filter((r) => r.reply);
+  const card = app.querySelector('.auth-card');
+  if (token !== renderToken || !answered.length || !card) return;
+  card.prepend(el('a', { class: 'reply-banner', href: '#/replies' },
+    el('span', { text: '📬' }),
+    el('span', { text: `관리자 답장이 왔어요${answered.length > 1 ? ` (${answered.length})` : ''}` }),
+    el('span', { class: 'reply-banner-go', text: '보기 →' })));
+}
+
+// 답장 글에서 임시 비밀번호를 찾아 크게 보여 주고 복사 버튼을 붙인다
+function replyText(text) {
+  const box = el('div', { class: 'reply-text' });
+  const match = text.match(/임시 비밀번호: ([a-z2-9]{8})/);
+  box.append(text.replace(/\n?임시 비밀번호: [a-z2-9]{8}/, '').trim());
+  if (match) {
+    const copy = el('button', { type: 'button', text: '복사', onclick: async () => {
+      try { await navigator.clipboard.writeText(match[1]); copy.textContent = '복사됨'; } catch { copy.textContent = '직접 복사해 주세요'; }
+    } });
+    box.append(el('div', { class: 'temp-password' },
+      el('div', {}, el('span', { text: '임시 비밀번호' }), el('code', { text: match[1] })),
+      copy,
+      el('p', { text: '24시간 안에 이 비밀번호로 로그인하면 새 비밀번호를 정하게 돼요.' })));
+  }
+  return box;
+}
+
+async function renderReplies(token) {
+  setTitle();
+  setActiveNav('');
+  const list = el('div', { class: 'reply-list' }, el('p', { class: 'auth-done-sub', text: '불러오는 중…' }));
+  app.replaceChildren(authCard('관리자 답장', '문의를 보낸 이 브라우저에서만 보여요', list,
+    el('a', { class: 'auth-submit as-link', href: '#/' }, el('span', { text: '로그인하러 가기' })),
+    backLink()));
+  let replies;
+  try { replies = await fetchReplies(); } catch (err) {
+    if (token === renderToken) list.replaceChildren(errorView(err.message, () => route()));
+    return;
+  }
+  if (token !== renderToken) return;
+  if (!replies.length) {
+    list.replaceChildren(el('p', { class: 'auth-done-sub', text: '보낸 문의가 없어요.' }));
+    return;
+  }
+  list.replaceChildren(...replies.map((r) => {
+    const date = new Date(r.at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
+    const item = el('div', { class: 'reply-item' },
+      el('div', { class: 'reply-mine' }, el('span', { text: `내 문의 · ${date}` }), el('p', { text: r.message })),
+      r.reply ? replyText(r.reply.text) : el('p', { class: 'reply-waiting', text: '아직 답장이 없어요.' }),
+      el('button', { type: 'button', class: 'reply-dismiss', text: r.reply ? '확인했어요 (지우기)' : '이 문의 지우기', onclick: () => {
+        saveTickets(loadTickets().filter((t) => t.ticket !== r.ticket));
+        item.remove();
+        if (!list.children.length) list.append(el('p', { class: 'auth-done-sub', text: '보낸 문의가 없어요.' }));
+      } }));
+    return item;
+  }));
 }
 
 // ---------- 비밀번호 바꾸기 (임시 비밀번호로 로그인했으면 꼭 바꿔야 함) ----------
@@ -1120,8 +1214,41 @@ async function renderAdmin(token) {
         el('div', { class: 'admin-actions' },
           el('button', { text: msg.read ? '안 읽음으로' : '읽음', onclick: () => actMessage(msg, msg.read ? 'unread' : 'read', card) }),
           el('button', { class: 'danger', text: '삭제', onclick: () => actMessage(msg, 'delete', card) }))),
-      el('p', { class: 'admin-message-text', text: msg.message }));
+      el('p', { class: 'admin-message-text', text: msg.message }),
+      replyArea(msg));
     return card;
+  }
+
+  // 답장: 문의한 사람의 브라우저(로그인 화면)에 보인다. 아이디가 있으면 비밀번호를 초기화해서 임시 비밀번호를 같이 보낼 수 있다.
+  function replyArea(msg) {
+    if (msg.reply) {
+      return el('div', { class: 'admin-reply sent' },
+        el('span', { text: `보낸 답장 · ${new Date(msg.reply.at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}` }),
+        el('p', { text: msg.reply.text }));
+    }
+    if (!msg.hasTicket) return el('p', { class: 'admin-reply-note', text: '예전 방식으로 받은 문의라 사이트로 답장할 수 없어요. 연락처로 연락해 주세요.' });
+    const text = el('textarea', { rows: '2', maxlength: '1000', placeholder: '답장 쓰기 (문의한 사람의 로그인 화면에 떠요)' });
+    const status = el('span', { class: 'admin-reply-note' });
+    const send = async (resetPassword) => {
+      if (resetPassword && !confirm(`아이디 ${msg.username}의 비밀번호를 초기화해서 임시 비밀번호를 답장으로 보낼까요?\n\n다른 사람이 ${msg.username}인 척 문의했을 수도 있어요. 이름·연락처로 본인인지 먼저 확인해 주세요.`)) return;
+      if (!resetPassword && !text.value.trim()) { status.textContent = '답장 내용을 적어 주세요.'; return; }
+      area.querySelectorAll('button').forEach((b) => (b.disabled = true));
+      try {
+        const res = await api('/api/admin/messages', { method: 'POST', body: { id: msg.id, action: 'reply', reply: text.value, resetPassword } });
+        msg.reply = res.reply;
+        msg.read = true;
+        draw();
+      } catch (err) {
+        status.textContent = err.message;
+        area.querySelectorAll('button').forEach((b) => (b.disabled = false));
+      }
+    };
+    const area = el('div', { class: 'admin-reply' }, text,
+      el('div', { class: 'admin-actions' },
+        el('button', { class: 'approve', text: '답장 보내기', onclick: () => send(false) }),
+        msg.username ? el('button', { text: '비밀번호 초기화해서 보내기', onclick: () => send(true) }) : null),
+      status);
+    return area;
   }
 
   function draw() {
