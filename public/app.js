@@ -40,6 +40,9 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+// 차단된 계정이면 로그인 화면에 그 안내를 띄운다.
+let blockedNotice = '';
+
 const NETWORK_ERROR = '서버에 연결하지 못했어요. 인터넷(와이파이)이 끊겼거나 학교·회사 인터넷이 이 주소를 막았을 수 있어요. 잠시 뒤 다시 해 보거나 다른 인터넷(데이터)으로 해 보세요.';
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -57,10 +60,11 @@ async function api(path, { method = 'GET', body } = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     // 로그인이 풀렸으면(승인 취소, 만료 등) 로그인 화면으로 돌아간다.
-    if (data.code === 'LOGIN_REQUIRED' && me) {
+    if ((data.code === 'LOGIN_REQUIRED' || data.code === 'BLOCKED') && me) {
       me = null;
       setTimeout(route, 0);
     }
+    if (data.code === 'BLOCKED') blockedNotice = data.error;
     const err = new Error(data.error || `요청 실패 (${res.status})`);
     err.code = data.code;
     throw err;
@@ -815,7 +819,9 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
     autocomplete: signup ? 'new-password' : 'current-password', placeholder: signup ? '6자 이상' : '비밀번호'
   });
-  const message = el('p', { class: `auth-message${notice ? ' ok' : ''}`, text: notice, role: 'alert' });
+  const message = notice
+    ? el('p', { class: 'auth-message ok', text: notice, role: 'alert' })
+    : el('p', { class: `auth-message${blockedNotice ? ' blocked' : ''}`, text: blockedNotice, role: 'alert' });
   const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: signup ? '가입 신청하기' : '로그인' }));
   const tab = (key, label) => el('button', {
     type: 'button', class: `auth-tab${mode === key ? ' active' : ''}`, text: label, 'aria-pressed': String(mode === key),
@@ -867,10 +873,11 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
         return;
       }
       me = await api('/api/auth/login', { method: 'POST', body });
+      blockedNotice = '';
       route();
     } catch (err) {
       message.textContent = err.message;
-      message.className = err.code === 'PENDING' ? 'auth-message wait' : 'auth-message';
+      message.className = err.code === 'PENDING' ? 'auth-message wait' : err.code === 'BLOCKED' ? 'auth-message blocked' : 'auth-message';
       submit.disabled = false;
       submit.classList.remove('loading');
     }
@@ -1101,7 +1108,7 @@ function renderPassword(token, forced) {
 
 // ---------- 관리자: 가입 승인 ----------
 
-const STATUS_LABELS = { pending: '승인 대기', approved: '승인됨', rejected: '거절됨' };
+const STATUS_LABELS = { pending: '승인 대기', approved: '승인됨', rejected: '거절됨', blocked: '차단됨' };
 
 async function renderAdmin(token) {
   setTitle('가입 승인 관리');
@@ -1152,15 +1159,21 @@ async function renderAdmin(token) {
   async function act(user, action, row) {
     if (action === 'reset' && !confirm(`${user.name || user.username}님의 비밀번호를 초기화할까요?\n임시 비밀번호가 만들어지고, 지금 로그인된 기기는 로그아웃돼요.`)) return;
     if (action === 'delete' && !confirm(`${user.name || user.username}님의 계정을 삭제할까요?`)) return;
+    let reason = '';
+    if (action === 'block') {
+      reason = prompt(`${user.name || user.username}님을 차단할까요?\n바로 로그아웃되고 다시 로그인할 수 없어요. 그 브라우저에서는 새로 가입도 안 돼요.\n\n차단 이유 (본인에게 보여요, 비워 둬도 돼요)`, '');
+      if (reason === null) return;
+    }
     row.querySelectorAll('button').forEach((b) => (b.disabled = true));
     try {
-      const res = await api('/api/admin/users', { method: 'POST', body: { username: user.username, action } });
+      const res = await api('/api/admin/users', { method: 'POST', body: { username: user.username, action, reason } });
       if (action === 'reset') {
         user.tempPassword = res.tempPassword;
       } else if (action === 'delete') {
         users = users.filter((u) => u !== user);
       } else {
-        user.status = { approve: 'approved', reject: 'rejected' }[action];
+        user.status = { approve: 'approved', reject: 'rejected', block: 'blocked', unblock: 'approved' }[action];
+        user.blockReason = action === 'block' ? reason.trim().slice(0, 100) : '';
       }
       draw();
     } catch (err) {
@@ -1174,14 +1187,16 @@ async function renderAdmin(token) {
     const date = user.createdAt ? new Date(user.createdAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '';
     const btn = (text, action, cls = '') => el('button', { class: cls, text, onclick: () => act(user, action, row) });
     const actions = {
-      pending: [btn('승인', 'approve', 'approve'), btn('거절', 'reject')],
-      approved: [btn('승인 취소', 'reject'), btn('비밀번호 초기화', 'reset'), btn('삭제', 'delete', 'danger')],
-      rejected: [btn('승인', 'approve', 'approve'), btn('삭제', 'delete', 'danger')]
+      pending: [btn('승인', 'approve', 'approve'), btn('거절', 'reject'), btn('차단', 'block', 'danger')],
+      approved: [btn('승인 취소', 'reject'), btn('비밀번호 초기화', 'reset'), btn('차단', 'block', 'danger')],
+      rejected: [btn('승인', 'approve', 'approve'), btn('차단', 'block', 'danger'), btn('삭제', 'delete', 'danger')],
+      blocked: [btn('차단 풀기', 'unblock', 'approve'), btn('삭제', 'delete', 'danger')]
     }[user.status] || [];
     row.append(
       el('div', { class: 'admin-user' },
         el('strong', { text: user.name || '(이름 없음)' }),
-        el('span', { text: [`아이디 ${user.username}`, date].filter(Boolean).join(' · ') })),
+        el('span', { text: [`아이디 ${user.username}`, date].filter(Boolean).join(' · ') }),
+        user.status === 'blocked' && user.blockReason ? el('span', { text: `차단 이유: ${user.blockReason}` }) : null),
       el('div', { class: 'admin-actions' }, ...actions));
     // 초기화하면 임시 비밀번호를 이 화면에서 한 번만 보여 준다 (저장되지 않아서 다시 볼 수 없음)
     if (user.tempPassword) {
@@ -1268,7 +1283,7 @@ async function renderAdmin(token) {
       messages.length
         ? el('ul', { class: 'admin-list' }, ...messages.map(messageCard))
         : el('p', { class: 'admin-empty', text: '받은 문의가 없어요.' }));
-    const sections = ['pending', 'approved', 'rejected'].map((status) => {
+    const sections = ['pending', 'approved', 'rejected', 'blocked'].map((status) => {
       const list = users.filter((u) => u.status === status);
       return el('section', { class: 'admin-section' },
         el('h2', { text: `${STATUS_LABELS[status]} ${list.length}` }),

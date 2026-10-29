@@ -20,7 +20,7 @@ const PBKDF2_ITERATIONS = 10000;
 const USERNAME = /^[a-zA-Z0-9_가-힣]{2,20}$/;
 // 본인 이름: 글자(한글, 영문 등), 공백, . - ' 만 1~20자
 const REAL_NAME = /^[\p{L}\p{M}][\p{L}\p{M} .'-]{0,19}$/u;
-const STATUSES = ['pending', 'approved', 'rejected'];
+const STATUSES = ['pending', 'approved', 'rejected', 'blocked'];
 
 // ---------- 공통 ----------
 
@@ -76,6 +76,24 @@ function sessionCookie(token, maxAge) {
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
+// 차단된 계정이 쓰던 브라우저에 남기는 표시. 이 표시가 있으면 그 브라우저에서는 새로 가입할 수 없다.
+// (공용 컴퓨터일 수도 있어서 로그인까지 막지는 않고, 30일 뒤에 사라진다)
+const BLOCKED_COOKIE = 'sy_blocked';
+const BLOCKED_COOKIE_TTL = 60 * 60 * 24 * 30;
+const blockedCookie = () => `${BLOCKED_COOKIE}=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${BLOCKED_COOKIE_TTL}`;
+
+function blockedMessage(user) {
+  return user.blockReason ? `관리자가 이 계정을 차단했어요.\n이유: ${user.blockReason}` : '관리자가 이 계정을 차단했어요.';
+}
+
+// 차단된 계정의 요청에 돌려줄 응답: 로그인을 지우고 브라우저에 차단 표시를 남긴다.
+export function blockedResponse(info) {
+  const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  headers.append('Set-Cookie', blockedCookie());
+  headers.append('Set-Cookie', sessionCookie('', 0));
+  return new Response(JSON.stringify({ error: info.blocked, code: 'BLOCKED' }), { status: 403, headers });
+}
+
 // 다른 사이트에서 폼으로 몰래 요청을 보내지 못하게 JSON 요청만 받는다.
 async function readJson(request, maxLength = 2000) {
   if (!(request.headers.get('Content-Type') || '').includes('application/json')) return null;
@@ -93,7 +111,7 @@ const userKey = (username) => `user:${username.toLowerCase()}`;
 
 async function putUser(env, user) {
   await env.DB.put(userKey(user.username), JSON.stringify(user), {
-    metadata: { username: user.username, name: user.name || '', status: user.status, createdAt: user.createdAt }
+    metadata: { username: user.username, name: user.name || '', status: user.status, createdAt: user.createdAt, blockReason: user.blockReason || '' }
   });
 }
 
@@ -135,7 +153,8 @@ async function createSession(env, data, ttl) {
 
 // ---------- 세션 확인 (다른 API 에서 사용) ----------
 
-export async function getSession(request, env) {
+// info 를 넘기면 차단된 계정일 때 info.blocked 에 안내 문구를 넣어 준다.
+export async function getSession(request, env, info = {}) {
   const token = getCookie(request, SESSION_COOKIE);
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
   const session = await env.DB.get(`session:${token}`, 'json');
@@ -143,6 +162,7 @@ export async function getSession(request, env) {
   if (session.role === 'admin') return { role: 'admin', token };
   // 승인이 취소되거나 계정이 지워지면 바로 못 쓰게, 매번 계정 상태를 확인한다.
   const user = await env.DB.get(userKey(session.username), 'json');
+  if (user?.status === 'blocked') info.blocked = blockedMessage(user);
   if (!user || user.status !== 'approved') return null;
   // 비밀번호가 바뀌었으면(초기화 포함) 예전 로그인은 풀린다.
   if ((session.pwv || 0) !== (user.pwv || 0)) return null;
@@ -156,6 +176,7 @@ async function signup(request, env) {
   const username = String(body?.username ?? '').trim();
   const password = String(body?.password ?? '');
   const name = String(body?.name ?? '').trim().replace(/\s+/g, ' ');
+  if (getCookie(request, BLOCKED_COOKIE)) return fail('차단된 계정을 쓰던 브라우저라 새로 가입할 수 없어요. 관리자에게 문의해 주세요.', 403, 'BLOCKED');
   if (!REAL_NAME.test(name)) return fail('이름을 1~20자로 적어 주세요. (글자와 띄어쓰기만)', 400);
   if (!USERNAME.test(username)) return fail('아이디는 한글, 영문, 숫자, _ 로 2~20자로 정해 주세요.', 400);
   if (password.length < 6 || password.length > 100) return fail('비밀번호는 6자 이상으로 정해 주세요.', 400);
@@ -179,6 +200,7 @@ async function login(request, env) {
   if (user.mustChange && user.tempExpires && Date.now() > user.tempExpires) {
     return fail('임시 비밀번호가 만료됐어요. 관리자에게 다시 문의해 주세요.', 401, 'TEMP_EXPIRED');
   }
+  if (user.status === 'blocked') return blockedResponse({ blocked: blockedMessage(user) });
   if (user.status === 'pending') return fail('아직 관리자 승인을 기다리고 있어요.', 403, 'PENDING');
   if (user.status !== 'approved') return fail('가입이 승인되지 않았어요.', 403, 'REJECTED');
 
@@ -309,7 +331,9 @@ async function logout(request, env) {
 }
 
 async function me(request, env) {
-  const session = await getSession(request, env);
+  const info = {};
+  const session = await getSession(request, env, info);
+  if (info.blocked) return blockedResponse(info);
   if (!session) return fail('로그인이 필요해요.', 401, 'LOGIN_REQUIRED');
   return json({ username: session.username || '관리자', name: session.name || '', role: session.role, mustChange: !!session.mustChange });
 }
@@ -334,7 +358,8 @@ async function listUsers(env) {
         username: key.metadata?.username || key.name.slice('user:'.length),
         name: key.metadata?.name || '',
         status: key.metadata?.status || 'pending',
-        createdAt: key.metadata?.createdAt || 0
+        createdAt: key.metadata?.createdAt || 0,
+        blockReason: key.metadata?.blockReason || ''
       });
     }
     cursor = page.list_complete ? undefined : page.cursor;
@@ -359,9 +384,12 @@ async function updateUser(request, env) {
   if (action === 'reset') {
     return json({ ok: true, tempPassword: await resetToTemp(env, user) });
   }
-  const status = { approve: 'approved', reject: 'rejected', pending: 'pending' }[action];
+  // 차단: 그 계정은 바로 로그아웃되고(매 요청마다 상태를 확인함) 다시 로그인할 수 없다.
+  const status = { approve: 'approved', reject: 'rejected', pending: 'pending', block: 'blocked', unblock: 'approved' }[action];
   if (!STATUSES.includes(status)) return fail('잘못된 요청', 400);
   user.status = status;
+  if (status === 'blocked') user.blockReason = cleanText(body?.reason, 100);
+  else delete user.blockReason;
   await putUser(env, user);
   return json({ ok: true, status });
 }

@@ -297,3 +297,45 @@ test('아이디가 없는 문의는 초기화해서 보낼 수 없고, 그냥 �
   const got = (await call('/api/auth/contact/replies', { method: 'POST', body: { tickets: [sent.body.ticket] } })).body[0];
   assert.equal(got.reply.text, '오늘 안에 승인할게요');
 });
+
+test('차단: 바로 로그아웃되고, 다시 로그인 못 하고, 그 브라우저에서는 새로 가입도 못 한다', async () => {
+  await signup('민수');
+  const a = await adminLogin();
+  await admin('approve', '민수', a.cookie);
+  const user = await login('민수');
+  assert.equal((await call('/api/search?q=x', { cookie: user.cookie })).status, 200);
+
+  const blocked = await call('/api/admin/users', { method: 'POST', body: { action: 'block', username: '민수', reason: '욕설' }, cookie: a.cookie });
+  assert.deepEqual(blocked.body, { ok: true, status: 'blocked' });
+  const list = await call('/api/admin/users', { cookie: a.cookie });
+  assert.deepEqual(list.body.map((u) => [u.status, u.blockReason]), [['blocked', '욕설']]);
+
+  // 쓰던 로그인은 바로 막히고, 차단 이유가 보이고, 브라우저에 차단 표시가 남는다
+  const kicked = await call('/api/search?q=x', { cookie: user.cookie });
+  assert.equal(kicked.status, 403);
+  assert.equal(kicked.body.code, 'BLOCKED');
+  assert.match(kicked.body.error, /이유: 욕설/);
+  assert.match(kicked.setCookie, /sy_blocked=1/);
+  assert.equal((await call('/api/auth/me', { cookie: user.cookie })).body.code, 'BLOCKED');
+
+  const again = await login('민수');
+  assert.equal(again.status, 403);
+  assert.equal(again.body.code, 'BLOCKED');
+  // 비밀번호가 틀리면 차단 여부를 알려 주지 않는다
+  assert.equal((await login('민수', 'wrong-pass')).body.code, 'BAD_LOGIN');
+
+  const newAccount = await call('/api/auth/signup', { method: 'POST', body: { username: '민수2', password: 'pass1234', name: '홍길동' }, cookie: 'sy_blocked=1' });
+  assert.equal(newAccount.status, 403);
+  assert.equal(newAccount.body.code, 'BLOCKED');
+
+  // 차단을 풀면 다시 로그인되고 이유는 지워진다
+  assert.equal((await admin('unblock', '민수', a.cookie)).body.status, 'approved');
+  assert.equal((await login('민수')).status, 200);
+  assert.equal((await call('/api/admin/users', { cookie: a.cookie })).body[0].blockReason, '');
+});
+
+test('차단은 관리자만', async () => {
+  await signup('민수');
+  const res = await call('/api/admin/users', { method: 'POST', body: { action: 'block', username: '민수' } });
+  assert.equal(res.status, 401);
+});

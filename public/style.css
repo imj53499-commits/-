@@ -346,6 +346,7 @@ body.auth-mode .content { padding: 0; }
 .auth-message { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; color: #c9373c; background: rgba(229, 72, 77, .1); }
 .auth-message:empty { display: none; }
 .auth-message.ok { color: #0f8a62; background: rgba(16, 185, 129, .12); font-weight: 600; }
+.auth-message.blocked { white-space: pre-line; font-weight: 600; }
 .auth-message.wait { color: #a86700; background: rgba(245, 158, 11, .14); }
 .auth-submit {
   position: relative; height: 50px; border-radius: 16px; margin-top: 4px; color: #fff; font-weight: 800; font-size: 16px;
