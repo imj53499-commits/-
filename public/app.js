@@ -169,7 +169,8 @@ function videoGrid(items, className = 'grid') {
 // 앱을 더 넣을 때는 여기에 하나씩 추가한다.
 const APPS = [
   { id: 'youtube', name: 'School YouTube', href: '#/youtube', color: 'linear-gradient(135deg, #34d399, #10b981 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z"/></svg>' },
-  { id: 'chess', name: '체스', href: '#/chess', color: 'linear-gradient(135deg, #a3a3a3, #57534e 55%, #1c1917)', icon: '<svg viewBox="0 0 24 24"><path d="M12 2.5a2 2 0 0 1 1.2 3.6c1.5.6 2.6 1.8 2.6 3.4 0 1-.5 1.9-1.2 2.5l1.4 5H8l1.4-5a3.3 3.3 0 0 1-1.2-2.5c0-1.6 1.1-2.8 2.6-3.4A2 2 0 0 1 12 2.5zM6.5 18.5h11l1 3h-13z"/></svg>' }
+  // 체스는 온라인 대결용 D1 을 연결할 때까지 잠시 닫아 둔다 (열려면 off 를 지우기)
+  { id: 'chess', name: '체스', href: '#/chess', off: true, color: 'linear-gradient(135deg, #a3a3a3, #57534e 55%, #1c1917)', icon: '<svg viewBox="0 0 24 24"><path d="M12 2.5a2 2 0 0 1 1.2 3.6c1.5.6 2.6 1.8 2.6 3.4 0 1-.5 1.9-1.2 2.5l1.4 5H8l1.4-5a3.3 3.3 0 0 1-1.2-2.5c0-1.6 1.1-2.8 2.6-3.4A2 2 0 0 1 12 2.5zM6.5 18.5h11l1 3h-13z"/></svg>' }
 ];
 
 // ---------- 다른 앱 (체스 등): 필요할 때만 불러온다 ----------
@@ -207,7 +208,7 @@ function renderLauncher() {
   app.replaceChildren(el('div', { class: 'launcher' },
     el('h1', { class: 'launcher-title', text: name ? `${name}님, 무엇을 할까요?` : '무엇을 할까요?' }),
     el('div', { class: 'app-grid' },
-      ...APPS.map(tile),
+      ...APPS.filter((a) => !a.off).map(tile),
       el('div', { class: 'app-tile soon', 'aria-hidden': 'true' },
         el('span', { class: 'app-icon' }, '+'),
         el('span', { class: 'app-name', text: '곧 추가돼요' })))));
@@ -826,7 +827,14 @@ function route() {
     if (q.trim()) return renderSearch(q.trim(), token);
   }
   if (!parts.length) return renderLauncher();
-  if (parts[0] === 'chess') return openChess(parts, token);
+  if (parts[0] === 'chess') {
+    // 닫아 둔 앱 주소로 들어오면 앱 목록으로
+    if (APPS.find((a) => a.id === 'chess').off) {
+      location.replace('#/');
+      return renderLauncher();
+    }
+    return openChess(parts, token);
+  }
   searchInput.value = '';
   const category = parts[0] === 'c' && CATEGORY_LABELS[parts[1]] ? parts[1] : 'all';
   return renderHome(category, token);
