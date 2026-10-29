@@ -1284,9 +1284,11 @@ async function renderAdmin(token) {
 // ---------- 계정 (설정 창) ----------
 
 const accountSection = document.getElementById('accountSection');
+const topLogoutBtn = document.getElementById('topLogoutBtn');
 
 function updateAccountUI() {
   accountSection.hidden = !me || me.role === 'guest';
+  topLogoutBtn.hidden = accountSection.hidden;
   if (!me) return;
   document.getElementById('accountName').textContent = me.name ? `${me.name} (${me.username})` : me.username;
   document.getElementById('adminLink').hidden = me.role !== 'admin';
@@ -1302,6 +1304,10 @@ async function logoutNow() {
 }
 
 document.getElementById('logoutBtn').addEventListener('click', logoutNow);
+// 바로 옆 나가기 버튼과 헷갈려 잘못 누르는 일이 없도록 한 번 묻는다.
+topLogoutBtn.addEventListener('click', () => {
+  if (confirm('로그아웃할까요?')) logoutNow();
+});
 document.getElementById('passwordLink').addEventListener('click', () => settingsDialog.close());
 document.getElementById('contactLink').addEventListener('click', () => settingsDialog.close());
 

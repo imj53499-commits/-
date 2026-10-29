@@ -59,6 +59,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .icon-btn { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; }
 .icon-btn:hover { background: var(--bg-hover); }
+.icon-btn[hidden] { display: none; }
 .logo { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 19px; letter-spacing: -0.5px; }
 .logo-mark { width: 30px; height: 22px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
 .logo-mark svg { width: 16px; height: 16px; fill: #fff; stroke: none; }
@@ -276,7 +277,7 @@ body.sidebar-collapsed .content { padding-left: 24px; }
 }
 
 /* 로그인 / 가입 화면 */
-body.auth-mode .sidebar, body.auth-mode .search, body.auth-mode .search-open-btn, body.auth-mode .logo { display: none !important; }
+body.auth-mode #topLogoutBtn, body.auth-mode .sidebar, body.auth-mode .search, body.auth-mode .search-open-btn, body.auth-mode .logo { display: none !important; }
 body.auth-mode .topbar { background: transparent; }
 body.auth-mode .content { padding: 0; }
 :root { --auth-glow-1: rgba(16, 185, 129, .22); --auth-glow-2: rgba(59, 130, 246, .18); --auth-glow-3: rgba(236, 72, 153, .12); --auth-card: rgba(255, 255, 255, .82); }
@@ -514,6 +515,7 @@ body.shorts-mode .content { padding-bottom: 0; }
   .history-section { padding-bottom: 0; margin-bottom: 0; border-bottom: 0; }
   .admin { padding: 16px 12px 40px; }
   .logo-text { font-size: 17px; }
+  .topbar-right { gap: 0; }
 
   /* 검색: 돋보기를 누르면 상단 바 전체가 검색창이 된다 */
   .search { display: none; }
@@ -586,6 +588,11 @@ body.shorts-mode .content { padding-bottom: 0; }
 }
 
 /* 큰 휴대폰 가로 / 태블릿: 2열 */
+/* 좁은 휴대폰: 상단 버튼(검색·테마·설정·로그아웃·나가기)이 다 들어가도록 로고 글자는 숨긴다 */
+@media (max-width: 430px) {
+  .logo-text { display: none; }
+}
+
 @media (min-width: 561px) and (max-width: 800px) {
   .grid { grid-template-columns: 1fr 1fr; gap: 24px 12px; padding: 4px 12px 0; }
   .grid .thumb { border-radius: 10px; }
