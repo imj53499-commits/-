@@ -79,7 +79,7 @@ test('가입 → 승인 대기 → 관리자 승인 → 로그인 → 영상 API
   assert.equal(ok.status, 200);
   assert.ok(ok.cookie.startsWith('sy_session='));
   assert.equal(ok.body.name, '홍길동');
-  assert.deepEqual((await call('/api/auth/me', { cookie: ok.cookie })).body, { username: '민수', name: '홍길동', role: 'user' });
+  assert.deepEqual((await call('/api/auth/me', { cookie: ok.cookie })).body, { username: '민수', name: '홍길동', role: 'user', mustChange: false });
   assert.equal((await call('/api/search?q=x', { cookie: ok.cookie })).status, 200);
 
   // 승인을 취소하면 바로 못 쓴다
@@ -162,4 +162,80 @@ test('세션 만료 시간이 설정된다', async () => {
   await adminLogin();
   const session = [...env.DB.store.entries()].find(([k]) => k.startsWith('session:'))[1];
   assert.ok(session.ttl > 0);
+});
+
+test('관리자에게 문의: 로그인 없이 보내고, 관리자만 보고 읽음/삭제, 1시간 5개까지', async () => {
+  const send = (body, cookie) => call('/api/auth/contact', { method: 'POST', body, cookie });
+  assert.equal((await send({ name: '', message: '안녕하세요' })).status, 400);
+  assert.equal((await send({ name: '김민수', message: '' })).status, 400);
+  const ok = await send({ name: '김민수', username: 'minsu', contact: '010-0000-0000', message: '비밀번호를 잊어버렸어요\n도와주세요' });
+  assert.equal(ok.status, 201);
+
+  assert.equal((await call('/api/admin/messages')).status, 401);
+  const a = await adminLogin();
+  const list = (await call('/api/admin/messages', { cookie: a.cookie })).body;
+  assert.equal(list.length, 1);
+  assert.deepEqual([list[0].name, list[0].username, list[0].contact, list[0].message, list[0].read],
+    ['김민수', 'minsu', '010-0000-0000', '비밀번호를 잊어버렸어요\n도와주세요', false]);
+
+  assert.equal((await call('/api/admin/messages', { method: 'POST', body: { id: list[0].id, action: 'read' }, cookie: a.cookie })).status, 200);
+  assert.equal((await call('/api/admin/messages', { cookie: a.cookie })).body[0].read, true);
+  await call('/api/admin/messages', { method: 'POST', body: { id: list[0].id, action: 'delete' }, cookie: a.cookie });
+  assert.deepEqual((await call('/api/admin/messages', { cookie: a.cookie })).body, []);
+
+  for (let i = 0; i < 4; i++) assert.equal((await send({ name: '도배', message: '테스트 ' + i })).status, 201);
+  const blocked = await send({ name: '도배', message: '여섯 번째' });
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.body.code, 'RATE_LIMIT');
+});
+
+test('로그인한 사람이 문의하면 아이디가 자동으로 붙는다', async () => {
+  await signup('kim');
+  const a = await adminLogin();
+  await admin('approve', 'kim', a.cookie);
+  const u = await login('kim');
+  await call('/api/auth/contact', { method: 'POST', body: { name: '', username: 'someoneelse', message: '영상이 안 나와요' }, cookie: u.cookie });
+  const msg = (await call('/api/admin/messages', { cookie: a.cookie })).body[0];
+  assert.deepEqual([msg.name, msg.username], ['홍길동', 'kim']);
+});
+
+test('비밀번호 초기화: 임시 비밀번호로만 로그인되고, 예전 로그인은 풀리고, 새 비밀번호를 정해야 한다', async () => {
+  await signup('lee', 'oldpass1');
+  const a = await adminLogin();
+  await admin('approve', 'lee', a.cookie);
+  const before = await login('lee', 'oldpass1');
+  assert.equal(before.body.mustChange, false);
+
+  const reset = await admin('reset', 'lee', a.cookie);
+  assert.equal(reset.status, 200);
+  const temp = reset.body.tempPassword;
+  assert.match(temp, /^[a-z2-9]{8}$/);
+  assert.ok(!JSON.stringify([...env.DB.store.values()]).includes(temp)); // 임시 비밀번호도 그대로 저장하지 않는다
+
+  assert.equal((await call('/api/auth/me', { cookie: before.cookie })).status, 401); // 예전 로그인 풀림
+  assert.equal((await login('lee', 'oldpass1')).status, 401);
+  const tempLogin = await login('lee', temp);
+  assert.equal(tempLogin.status, 200);
+  assert.equal(tempLogin.body.mustChange, true);
+  assert.equal((await call('/api/auth/me', { cookie: tempLogin.cookie })).body.mustChange, true);
+
+  const change = (body, cookie = tempLogin.cookie) => call('/api/auth/password', { method: 'POST', body, cookie });
+  assert.equal((await change({ current: 'wrong', next: 'newpass9' })).status, 400);
+  assert.equal((await change({ current: temp, next: '123' })).status, 400);
+  const changed = await change({ current: temp, next: 'newpass9' });
+  assert.equal(changed.status, 200);
+  assert.equal((await call('/api/auth/me', { cookie: tempLogin.cookie })).status, 401); // 바꾸기 전 쿠키는 풀림
+  const me2 = await call('/api/auth/me', { cookie: changed.cookie }); // 새 쿠키로 계속 로그인 상태
+  assert.equal(me2.body.mustChange, false);
+  assert.equal((await login('lee', temp)).status, 401);
+  assert.equal((await login('lee', 'newpass9')).status, 200);
+});
+
+test('비밀번호 바꾸기는 로그인해야 하고, 관리자 초기화는 관리자만', async () => {
+  assert.equal((await call('/api/auth/password', { method: 'POST', body: { current: 'a', next: 'bbbbbb' } })).status, 401);
+  await signup('park');
+  const a = await adminLogin();
+  await admin('approve', 'park', a.cookie);
+  const u = await login('park');
+  assert.equal((await admin('reset', 'park', u.cookie)).status, 401);
 });

@@ -703,8 +703,11 @@ function route() {
   document.body.classList.remove('shorts-mode');
 
   if (parts[0] === 'admin') return renderAdmin(token);
-  document.body.classList.toggle('auth-mode', !me);
+  document.body.classList.toggle('auth-mode', !me || !!me.mustChange);
+  if (parts[0] === 'contact') return renderContact(token);
   if (!me) return renderAuth(token);
+  if (me.mustChange) return renderPassword(token, true);
+  if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
 
   if (parts[0] === 'shorts') return renderShorts(token);
   if (parts[0] === 'watch' && /^[\w-]{11}$/.test(parts[1] || '')) return renderWatch(parts[1], token);
@@ -728,7 +731,8 @@ const ICONS = {
   lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
   eye: '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   eyeOff: '<svg viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.1 4M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.6 0 3-.4 4.3-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
-  check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
+  check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  mail: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>'
 };
 
 function icon(name, cls = 'auth-icon') {
@@ -813,7 +817,8 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     field('비밀번호', password, 'lock', signup ? { hint: '6자 이상', check: RULES.password } : {}),
     message,
     submit,
-    el('p', { class: 'auth-foot', text: signup ? '이메일은 필요 없어요 · 관리자가 승인하면 바로 쓸 수 있어요' : '처음이라면 위에서 가입하기를 눌러 주세요' }));
+    el('p', { class: 'auth-foot', text: signup ? '이메일은 필요 없어요 · 관리자가 승인하면 바로 쓸 수 있어요' : '처음이라면 위에서 가입하기를 눌러 주세요' }),
+    el('a', { class: 'auth-link', href: '#/contact', text: signup ? '가입이 안 되나요? 관리자에게 문의하기' : '비밀번호를 잊었나요? 관리자에게 문의하기' }));
 
   // 다시 입력하기 시작하면 이전 오류 문구는 지운다 (안내/승인 대기 문구는 남겨 둔다)
   form.addEventListener('input', () => {
@@ -879,6 +884,117 @@ function renderSignupDone(token, name, username) {
         el('span', { text: '로그인 화면으로' })))));
 }
 
+// ---------- 관리자에게 문의 (로그인 안 해도 됨) ----------
+
+function backLink(text = '← 돌아가기') {
+  return el('a', { class: 'auth-link', href: '#/', text, onclick: (e) => {
+    // 바로 전 화면(로그인·가입 화면 등)으로 돌아간다
+    if (history.length > 1) { e.preventDefault(); history.back(); }
+  } });
+}
+
+function renderContact(token) {
+  setTitle();
+  setActiveNav('');
+  const loggedIn = me?.role === 'user';
+  const name = el('input', { name: 'name', maxlength: '20', placeholder: '홍길동', autocomplete: 'name' });
+  const username = el('input', { name: 'username', maxlength: '20', placeholder: '가입한 아이디 (있으면)', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+  const contactInfo = el('input', { name: 'contact', maxlength: '100', placeholder: '답장 받을 연락처 (선택)' });
+  const message = el('textarea', { name: 'message', maxlength: '1000', rows: '5', placeholder: '예) 비밀번호를 잊어버렸어요 / 가입 승인 부탁드려요' });
+  if (loggedIn) {
+    name.value = me.name || '';
+    username.value = me.username;
+    username.disabled = true;
+  }
+  const counter = el('span', { class: 'field-hint', text: '0 / 1000' });
+  message.addEventListener('input', () => { counter.textContent = `${message.value.length} / 1000`; });
+  const error = el('p', { class: 'auth-message', role: 'alert' });
+  const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: '보내기' }));
+
+  const form = el('form', { class: 'auth-form', novalidate: '' },
+    field('이름', name, 'user'),
+    field('아이디', username, 'id', { hint: loggedIn ? '로그인한 아이디로 보내요' : '선택' }),
+    field('연락처', contactInfo, 'mail', { hint: '선택 · 관리자가 답장할 수 있게' }),
+    el('label', { class: 'field' }, el('span', { class: 'field-label', text: '문의 내용' }), message, counter),
+    error,
+    submit,
+    backLink());
+  form.addEventListener('input', () => { if (error.className === 'auth-message') error.textContent = ''; });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!name.value.trim()) { error.textContent = '이름을 적어 주세요.'; name.focus(); return; }
+    if (message.value.trim().length < 2) { error.textContent = '문의 내용을 적어 주세요.'; message.focus(); return; }
+    submit.disabled = true;
+    submit.classList.add('loading');
+    try {
+      await api('/api/auth/contact', { method: 'POST', body: {
+        name: name.value.trim(), username: username.value.trim(), contact: contactInfo.value.trim(), message: message.value
+      } });
+      if (token !== renderToken) return;
+      app.replaceChildren(authCard('문의를 보냈어요', '',
+        el('div', { class: 'auth-done' },
+          icon('check', 'auth-done-badge'),
+          el('p', { class: 'auth-done-sub', text: '관리자가 확인하면 연락처로 답장하거나, 계정 문제를 해결해 줄 거예요.' }),
+          el('a', { class: 'auth-submit as-link', href: '#/' }, el('span', { text: '처음 화면으로' })))));
+    } catch (err) {
+      error.textContent = err.message;
+      submit.disabled = false;
+      submit.classList.remove('loading');
+    }
+  });
+
+  app.replaceChildren(authCard('관리자에게 문의', '비밀번호를 잊었거나 가입·승인이 안 될 때 남겨 주세요', form));
+  (loggedIn ? message : name).focus();
+}
+
+// ---------- 비밀번호 바꾸기 (임시 비밀번호로 로그인했으면 꼭 바꿔야 함) ----------
+
+function renderPassword(token, forced) {
+  setTitle();
+  setActiveNav('');
+  const current = el('input', { type: 'password', autocomplete: 'current-password', placeholder: forced ? '관리자에게 받은 임시 비밀번호' : '지금 비밀번호' });
+  const next = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '6자 이상' });
+  const again = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '한 번 더' });
+  const error = el('p', { class: 'auth-message', role: 'alert' });
+  const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: '비밀번호 바꾸기' }));
+  const form = el('form', { class: 'auth-form', novalidate: '' },
+    field(forced ? '임시 비밀번호' : '지금 비밀번호', current, 'lock'),
+    field('새 비밀번호', next, 'lock', { hint: '6자 이상', check: RULES.password }),
+    field('새 비밀번호 확인', again, 'lock', { check: (v) => v.length > 0 && v === next.value }),
+    error,
+    submit,
+    forced ? el('button', { type: 'button', class: 'auth-link as-button', text: '로그아웃', onclick: logoutNow }) : backLink());
+  form.addEventListener('input', () => { error.textContent = ''; });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!current.value) { error.textContent = '지금 비밀번호를 적어 주세요.'; current.focus(); return; }
+    if (!RULES.password(next.value)) { error.textContent = '새 비밀번호는 6자 이상이에요.'; next.focus(); return; }
+    if (next.value !== again.value) { error.textContent = '새 비밀번호가 서로 달라요.'; again.focus(); return; }
+    submit.disabled = true;
+    submit.classList.add('loading');
+    try {
+      await api('/api/auth/password', { method: 'POST', body: { current: current.value, next: next.value } });
+      if (token !== renderToken) return;
+      me.mustChange = false;
+      app.replaceChildren(authCard('비밀번호를 바꿨어요', '',
+        el('div', { class: 'auth-done' },
+          icon('check', 'auth-done-badge'),
+          el('p', { class: 'auth-done-sub', text: '다른 기기에서 로그인돼 있었다면 거기서는 다시 로그인해야 해요.' }),
+          el('a', { class: 'auth-submit as-link', href: '#/', onclick: () => setTimeout(route, 0) }, el('span', { text: '계속하기' })))));
+    } catch (err) {
+      error.textContent = err.message;
+      submit.disabled = false;
+      submit.classList.remove('loading');
+    }
+  });
+
+  app.replaceChildren(authCard(forced ? '새 비밀번호 정하기' : '비밀번호 바꾸기',
+    forced ? '임시 비밀번호로 로그인했어요. 계속하려면 새 비밀번호를 정해 주세요.' : '바꾸면 다른 기기의 로그인은 풀려요.', form));
+  current.focus();
+}
+
 // ---------- 관리자: 가입 승인 ----------
 
 const STATUS_LABELS = { pending: '승인 대기', approved: '승인됨', rejected: '거절됨' };
@@ -912,13 +1028,14 @@ async function renderAdmin(token) {
   const body = el('div', { class: 'admin-body' }, el('p', { class: 'message', text: '불러오는 중…' }));
   app.replaceChildren(el('div', { class: 'admin' },
     el('div', { class: 'admin-head' },
-      el('h1', { text: '가입 승인 관리' }),
+      el('h1', { text: '관리자' }),
       el('button', { class: 'admin-refresh', text: '새로고침', onclick: () => route() })),
     body));
 
   let users;
+  let messages;
   try {
-    users = await api('/api/admin/users');
+    [users, messages] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages')]);
   } catch (err) {
     if (token !== renderToken) return;
     if (err.code === 'ADMIN_REQUIRED') { me = null; return route(); }
@@ -929,11 +1046,18 @@ async function renderAdmin(token) {
 
   // 저장소 목록은 바로 반영되지 않을 수 있어서, 버튼을 누르면 화면에서 직접 바꾼다.
   async function act(user, action, row) {
+    if (action === 'reset' && !confirm(`${user.name || user.username}님의 비밀번호를 초기화할까요?\n임시 비밀번호가 만들어지고, 지금 로그인된 기기는 로그아웃돼요.`)) return;
+    if (action === 'delete' && !confirm(`${user.name || user.username}님의 계정을 삭제할까요?`)) return;
     row.querySelectorAll('button').forEach((b) => (b.disabled = true));
     try {
-      await api('/api/admin/users', { method: 'POST', body: { username: user.username, action } });
-      if (action === 'delete') users = users.filter((u) => u !== user);
-      else user.status = { approve: 'approved', reject: 'rejected' }[action];
+      const res = await api('/api/admin/users', { method: 'POST', body: { username: user.username, action } });
+      if (action === 'reset') {
+        user.tempPassword = res.tempPassword;
+      } else if (action === 'delete') {
+        users = users.filter((u) => u !== user);
+      } else {
+        user.status = { approve: 'approved', reject: 'rejected' }[action];
+      }
       draw();
     } catch (err) {
       alert(err.message);
@@ -947,7 +1071,7 @@ async function renderAdmin(token) {
     const btn = (text, action, cls = '') => el('button', { class: cls, text, onclick: () => act(user, action, row) });
     const actions = {
       pending: [btn('승인', 'approve', 'approve'), btn('거절', 'reject')],
-      approved: [btn('승인 취소', 'reject'), btn('삭제', 'delete', 'danger')],
+      approved: [btn('승인 취소', 'reject'), btn('비밀번호 초기화', 'reset'), btn('삭제', 'delete', 'danger')],
       rejected: [btn('승인', 'approve', 'approve'), btn('삭제', 'delete', 'danger')]
     }[user.status] || [];
     row.append(
@@ -955,10 +1079,58 @@ async function renderAdmin(token) {
         el('strong', { text: user.name || '(이름 없음)' }),
         el('span', { text: [`아이디 ${user.username}`, date].filter(Boolean).join(' · ') })),
       el('div', { class: 'admin-actions' }, ...actions));
+    // 초기화하면 임시 비밀번호를 이 화면에서 한 번만 보여 준다 (저장되지 않아서 다시 볼 수 없음)
+    if (user.tempPassword) {
+      const copy = el('button', { type: 'button', text: '복사', onclick: async () => {
+        try { await navigator.clipboard.writeText(user.tempPassword); copy.textContent = '복사됨'; } catch { copy.textContent = '직접 복사해 주세요'; }
+      } });
+      row.append(el('div', { class: 'temp-password' },
+        el('div', {},
+          el('span', { text: '임시 비밀번호' }),
+          el('code', { text: user.tempPassword })),
+        copy,
+        el('p', { text: '본인에게 알려 주세요. 이 화면을 벗어나면 다시 볼 수 없어요. 이 비밀번호로 로그인하면 새 비밀번호를 정하게 돼요.' })));
+    }
     return row;
   }
 
+  async function actMessage(msg, action, card) {
+    if (action === 'delete' && !confirm('이 문의를 삭제할까요?')) return;
+    card.querySelectorAll('button').forEach((b) => (b.disabled = true));
+    try {
+      await api('/api/admin/messages', { method: 'POST', body: { id: msg.id, action } });
+      if (action === 'delete') messages = messages.filter((m) => m !== msg);
+      else msg.read = action === 'read';
+      draw();
+    } catch (err) {
+      alert(err.message);
+      card.querySelectorAll('button').forEach((b) => (b.disabled = false));
+    }
+  }
+
+  function messageCard(msg) {
+    const card = el('li', { class: `admin-message${msg.read ? ' read' : ''}` });
+    const date = new Date(msg.at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
+    const who = [msg.username && `아이디 ${msg.username}`, msg.contact && `연락처 ${msg.contact}`, date].filter(Boolean).join(' · ');
+    card.append(
+      el('div', { class: 'admin-message-head' },
+        el('div', { class: 'admin-user' },
+          el('strong', { text: (msg.read ? '' : '● ') + msg.name }),
+          el('span', { text: who })),
+        el('div', { class: 'admin-actions' },
+          el('button', { text: msg.read ? '안 읽음으로' : '읽음', onclick: () => actMessage(msg, msg.read ? 'unread' : 'read', card) }),
+          el('button', { class: 'danger', text: '삭제', onclick: () => actMessage(msg, 'delete', card) }))),
+      el('p', { class: 'admin-message-text', text: msg.message }));
+    return card;
+  }
+
   function draw() {
+    const unread = messages.filter((m) => !m.read).length;
+    const inbox = el('section', { class: 'admin-section' },
+      el('h2', { text: `문의함 ${messages.length}${unread ? ` (안 읽음 ${unread})` : ''}` }),
+      messages.length
+        ? el('ul', { class: 'admin-list' }, ...messages.map(messageCard))
+        : el('p', { class: 'admin-empty', text: '받은 문의가 없어요.' }));
     const sections = ['pending', 'approved', 'rejected'].map((status) => {
       const list = users.filter((u) => u.status === status);
       return el('section', { class: 'admin-section' },
@@ -967,7 +1139,7 @@ async function renderAdmin(token) {
           ? el('ul', { class: 'admin-list' }, ...list.map(userRow))
           : el('p', { class: 'admin-empty', text: status === 'pending' ? '기다리는 사람이 없어요.' : '없음' }));
     });
-    body.replaceChildren(...sections);
+    body.replaceChildren(inbox, ...sections);
   }
   draw();
 }
@@ -981,15 +1153,20 @@ function updateAccountUI() {
   if (!me) return;
   document.getElementById('accountName').textContent = me.name ? `${me.name} (${me.username})` : me.username;
   document.getElementById('adminLink').hidden = me.role !== 'admin';
+  document.getElementById('passwordLink').hidden = me.role !== 'user';
 }
 
-document.getElementById('logoutBtn').addEventListener('click', async () => {
+async function logoutNow() {
   try { await api('/api/auth/logout', { method: 'POST', body: {} }); } catch {}
   me = null;
   settingsDialog.close();
   location.hash = '#/';
   route();
-});
+}
+
+document.getElementById('logoutBtn').addEventListener('click', logoutNow);
+document.getElementById('passwordLink').addEventListener('click', () => settingsDialog.close());
+document.getElementById('contactLink').addEventListener('click', () => settingsDialog.close());
 
 document.getElementById('adminLink').addEventListener('click', () => settingsDialog.close());
 
