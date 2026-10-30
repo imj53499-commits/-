@@ -195,74 +195,6 @@ async function openChess(parts, token) {
   chessModule.renderChess(parts, { app, el, api, me, showToast, isCurrent: () => token === renderToken });
 }
 
-// 학생들이 자주 쓰는 사이트 (새 탭으로 열림). 바꾸려면 여기만 고치면 된다.
-const SITES = [
-  { name: '클래스룸', url: 'https://classroom.google.com' },
-  { name: 'e학습터', url: 'https://cls.edunet.net' },
-  { name: 'EBS 온라인클래스', url: 'https://oc.ebssw.kr' },
-  { name: 'EBSi', url: 'https://www.ebsi.co.kr' },
-  { name: '나이스 대국민', url: 'https://www.neis.go.kr' },
-  { name: '클래스카드', url: 'https://www.classcard.net' },
-  { name: '띵커벨', url: 'https://www.tkbell.co.kr' },
-  { name: '패들렛', url: 'https://padlet.com' },
-  { name: '구글 문서', url: 'https://docs.google.com' },
-  { name: '구글 드라이브', url: 'https://drive.google.com' },
-  { name: '캔바', url: 'https://www.canva.com' },
-  { name: '미리캔버스', url: 'https://www.miricanvas.com' },
-  { name: '파파고', url: 'https://papago.naver.com' },
-  { name: '네이버 사전', url: 'https://dict.naver.com' },
-  { name: '구글 번역', url: 'https://translate.google.com' },
-  { name: '콴다', url: 'https://qanda.ai' }
-];
-
-// 내 바로가기: 각자 브라우저에 저장 (학교 리로스쿨 같은 사이트를 직접 넣을 수 있게)
-const MY_LINKS_KEY = 'myLinks';
-const MY_LINKS_MAX = 24;
-
-function loadMyLinks() {
-  try {
-    const list = JSON.parse(localStorage.getItem(MY_LINKS_KEY) || '[]');
-    return Array.isArray(list) ? list.filter((l) => l && typeof l.name === 'string' && /^https?:\/\//.test(l.url)).slice(0, MY_LINKS_MAX) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveMyLinks(list) {
-  try { localStorage.setItem(MY_LINKS_KEY, JSON.stringify(list.slice(0, MY_LINKS_MAX))); } catch {}
-}
-
-// "riroschool.kr/abc" 처럼 넣어도 https:// 를 붙여 준다. 틀리면 ''.
-function cleanUrl(input) {
-  const text = String(input || '').trim();
-  if (!text) return '';
-  try {
-    const url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
-    return cleanDomain(url.hostname) ? url.href : '';
-  } catch {
-    return '';
-  }
-}
-
-function siteTile(site, onRemove) {
-  const domain = cleanDomain(site.url);
-  // 아이콘을 못 불러오면(학교에서 막힘 등) 이름 첫 글자로
-  const letter = el('span', { class: 'site-letter', text: site.name.trim().charAt(0) || '?' });
-  const img = el('img', { src: iconFor(domain), alt: '', width: '32', height: '32', loading: 'lazy' });
-  img.addEventListener('error', () => img.replaceWith(letter));
-  const tile = el('a', { class: 'app-tile site', href: site.url, target: '_blank', rel: 'noopener noreferrer', title: site.url },
-    el('span', { class: 'site-icon' }, img),
-    el('span', { class: 'app-name', text: site.name }));
-  if (onRemove) {
-    tile.append(el('button', { type: 'button', class: 'site-remove', 'aria-label': `${site.name} 지우기`, text: '×', onclick: (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      onRemove();
-    } }));
-  }
-  return tile;
-}
-
 function renderLauncher() {
   setTitle();
   setActiveNav('');
@@ -273,64 +205,13 @@ function renderLauncher() {
     iconEl.innerHTML = a.icon;
     return el('a', { class: 'app-tile', href: a.href }, iconEl, el('span', { class: 'app-name', text: a.name }));
   };
-
-  // 내 바로가기: + 로 추가, 편집을 누르면 × 로 지우기
-  const mine = el('div', { class: 'app-grid sites' });
-  const editBtn = el('button', { type: 'button', class: 'launcher-edit', text: '편집' });
-  let editing = false;
-  const form = el('form', { class: 'link-form', hidden: '' });
-  const nameInput = el('input', { type: 'text', maxlength: '20', placeholder: '이름 (예: 리로스쿨)', 'aria-label': '바로가기 이름', required: '' });
-  const urlInput = el('input', { type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false', placeholder: '주소 (예: myschool.riroschool.kr)', 'aria-label': '바로가기 주소', required: '' });
-  const formMsg = el('p', { class: 'link-form-msg', role: 'alert' });
-  form.append(nameInput, urlInput,
-    el('div', { class: 'link-form-actions' },
-      el('button', { type: 'button', text: '취소', onclick: () => { form.hidden = true; } }),
-      el('button', { type: 'submit', class: 'primary', text: '추가' })),
-    formMsg);
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const url = cleanUrl(urlInput.value);
-    const label = nameInput.value.trim();
-    if (!label) return void (formMsg.textContent = '이름을 적어 주세요.');
-    if (!url) return void (formMsg.textContent = '주소를 확인해 주세요. (예: naver.com)');
-    const list = loadMyLinks();
-    if (list.length >= MY_LINKS_MAX) return void (formMsg.textContent = `바로가기는 ${MY_LINKS_MAX}개까지 넣을 수 있어요.`);
-    saveMyLinks([...list, { name: label, url }]);
-    form.reset();
-    formMsg.textContent = '';
-    form.hidden = true;
-    drawMine();
-  });
-
-  function drawMine() {
-    const list = loadMyLinks();
-    mine.replaceChildren(
-      ...list.map((link, i) => siteTile(link, editing ? () => {
-        saveMyLinks(loadMyLinks().filter((_, j) => j !== i));
-        drawMine();
-      } : null)),
-      el('button', { type: 'button', class: 'app-tile site add', onclick: () => {
-        form.hidden = false;
-        nameInput.focus();
-      } }, el('span', { class: 'site-icon', text: '+' }), el('span', { class: 'app-name', text: '바로가기 추가' })));
-    editBtn.hidden = !list.length;
-    editBtn.textContent = editing ? '완료' : '편집';
-  }
-  editBtn.addEventListener('click', () => {
-    editing = !editing;
-    drawMine();
-  });
-  drawMine();
-
   app.replaceChildren(el('div', { class: 'launcher' },
     el('h1', { class: 'launcher-title', text: name ? `${name}님, 무엇을 할까요?` : '무엇을 할까요?' }),
-    el('div', { class: 'app-grid' }, ...APPS.filter((a) => !a.off).map(tile)),
-    el('div', { class: 'launcher-head' }, el('h2', { text: '내 바로가기' }), editBtn),
-    form,
-    mine,
-    el('div', { class: 'launcher-head' }, el('h2', { text: '자주 쓰는 사이트' })),
-    el('div', { class: 'app-grid sites' }, ...SITES.map((s) => siteTile(s))),
-    el('p', { class: 'launcher-note', text: '사이트는 새 탭으로 열려요. 학교 인터넷에서 막힌 사이트는 열리지 않을 수 있어요. 내 바로가기는 이 브라우저에만 저장돼요.' })));
+    el('div', { class: 'app-grid' },
+      ...APPS.filter((a) => !a.off).map(tile),
+      el('div', { class: 'app-tile soon', 'aria-hidden': 'true' },
+        el('span', { class: 'app-icon' }, '+'),
+        el('span', { class: 'app-name', text: '곧 추가돼요' })))));
 }
 
 // ---------- 체험 중 남은 시간 ----------
