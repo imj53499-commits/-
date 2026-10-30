@@ -777,3 +777,12 @@ body.app-mode .content, body.app-mode.sidebar-collapsed .content { padding-left:
   :root:not([data-theme="light"]) .offer { background: #3d3212; color: #ffd978; }
 }
 :root[data-theme="dark"] .offer { background: #3d3212; color: #ffd978; }
+
+/* 이동 단축키 정하기 (처음 유튜브에 들어갈 때) */
+.jump-setup .auth { min-height: calc(100vh - var(--topbar-h) - 40px); }
+.jump-label { font-size: 14px; font-weight: 700; margin-top: 4px; }
+.jump-hint { font-size: 12px; color: var(--text-sub); line-height: 1.5; margin-top: -4px; }
+.jump-setup input { height: 48px; padding: 0 14px; border-radius: 14px; border: 1.5px solid var(--border); background: var(--bg); color: inherit; font-size: 15px; }
+.jump-setup input:focus { outline: none; border-color: var(--accent); }
+.jump-key { height: 52px; border-radius: 14px; border: 1.5px dashed var(--border); background: var(--bg-soft); color: inherit; font: 700 17px ui-monospace, monospace; cursor: pointer; }
+.jump-key.recording { border-color: var(--accent); color: var(--accent); }

@@ -1,7 +1,8 @@
 // 팝업 플레이어: /popup.html?v=<영상ID>&t=<시작 초>
 // 정해 둔 단축키(기본 Q)를 누르면 팝업 창이 바로 닫힌다. 자동재생이 켜져 있으면 끝난 뒤 다음 영상으로 넘어간다.
 import {
-  POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT, loadShortcut, matchesShortcut, keepKeyboardFocus
+  POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT, loadShortcut, matchesShortcut, keepKeyboardFocus,
+  loadJump, jumpChannel, isTypingKey, isTypingTarget
 } from './shortcuts.js';
 import {
   embedUrl, listenTo, readPlayerMessage, autostart, loadAutoplay, recordWatch, pickNext, savePopupBounds, ENDED, PAUSED,
@@ -103,7 +104,19 @@ window.addEventListener('storage', (e) => {
   if (e.key === POPUP_SHORTCUT_KEY) shortcut = loadShortcut(POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT);
 });
 
+const channel = jumpChannel();
+
 function onKey(e) {
+  // 이동 단축키: 메인 화면에 알려서 정한 사이트로 바꾸고 팝업은 닫는다
+  const jump = loadJump();
+  if (jump && matchesShortcut(e, jump.shortcut) && !(isTypingKey(jump.shortcut) && isTypingTarget(e.target))) {
+    e.preventDefault();
+    saveNow(true);
+    channel?.postMessage('jump');
+    document.body.replaceChildren();
+    host.close();
+    return;
+  }
   if (matchesShortcut(e, shortcut)) {
     e.preventDefault();
     saveNow(true);

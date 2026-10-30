@@ -1,7 +1,7 @@
 import {
   COVER_SHORTCUT_KEY, POPUP_SHORTCUT_KEY, DEFAULT_COVER_SHORTCUT, DEFAULT_POPUP_SHORTCUT, MODIFIER_CODES,
   loadShortcut, storeShortcut, shortcutFromEvent, shortcutLabel, matchesShortcut, isTypingKey, isTypingTarget,
-  keepKeyboardFocus
+  keepKeyboardFocus, JUMP_SHORTCUT_KEY, JUMP_URL_KEY, loadJump, saveJump, jumpChannel
 } from './shortcuts.js';
 import {
   embedUrl, sendToPlayer, listenTo, readPlayerMessage, autostart, loadAutoplay, saveAutoplay,
@@ -818,6 +818,10 @@ function route() {
   }
   if (me.mustChange) return renderPassword(token, true);
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
+
+  // 유튜브를 처음 쓸 때는 이동 단축키부터 정해야 한다 (키보드가 없는 휴대폰은 빼고)
+  if (parts[0] === 'jump-setup') return renderJumpSetup(token, '#/youtube');
+  if (parts.length && parts[0] !== 'chess' && needsJumpSetup()) return renderJumpSetup(token, location.hash);
 
   if (parts[0] === 'shorts') return renderShorts(token);
   if (parts[0] === 'watch' && /^[\w-]{11}$/.test(parts[1] || '')) return renderWatch(parts[1], token);
@@ -1801,6 +1805,142 @@ function quickExit() {
 
 document.getElementById('exitBtn').addEventListener('click', quickExit);
 
+// ---------- 이동 단축키: 정한 키를 누르면 정한 사이트로 바로 이동 ----------
+
+const touchOnly = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+let jump = loadJump();
+let pickingJumpKey = false; // 이동 단축키를 고르는 중에는 다른 단축키가 동작하지 않게
+
+function needsJumpSetup() {
+  return !jump && !touchOnly;
+}
+
+function jumpAway() {
+  if (!jump) return;
+  saveWatching(true);
+  closePopup();
+  document.documentElement.style.visibility = 'hidden';
+  document.querySelectorAll('iframe').forEach((f) => f.remove());
+  location.replace(jump.url); // 뒤로 가기로 돌아오지 않게
+}
+
+// "classroom.google.com" 처럼 넣어도 https:// 를 붙여 준다. 틀리면 ''.
+function cleanJumpUrl(input) {
+  const text = String(input || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+    return cleanDomain(url.hostname) ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function renderJumpSetup(token, next) {
+  setTitle();
+  setActiveNav('');
+  document.body.classList.add('app-mode');
+  appTitle.textContent = '';
+  let picked = jump?.shortcut || null;
+  let listening = false;
+  const setListening = (on) => {
+    listening = on;
+    pickingJumpKey = on;
+  };
+
+  const urlInput = el('input', { type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false', placeholder: '예: classroom.google.com', 'aria-label': '이동할 사이트 주소' });
+  if (jump) urlInput.value = jump.url;
+  const keyBtn = el('button', { type: 'button', class: 'jump-key' });
+  const message = el('p', { class: 'auth-message', role: 'alert' });
+  const showKey = () => {
+    keyBtn.textContent = listening ? '원하는 키를 누르세요…' : picked ? shortcutLabel(picked) : '눌러서 키 정하기';
+    keyBtn.classList.toggle('recording', listening);
+  };
+  function onKey(e) {
+    if (token !== renderToken) {
+      setListening(false);
+      return window.removeEventListener('keydown', onKey, true);
+    }
+    if (MODIFIER_CODES.test(e.code) || !e.code) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const sc = shortcutFromEvent(e);
+    window.removeEventListener('keydown', onKey, true);
+    setListening(false);
+    if (matchesShortcut(e, coverShortcut)) {
+      message.textContent = `${shortcutLabel(sc)} 는 화면 가리기 단축키라서 쓸 수 없어요. 다른 키를 정해 주세요.`;
+    } else if (matchesShortcut(e, popupShortcut)) {
+      message.textContent = `${shortcutLabel(sc)} 는 팝업 닫기 단축키라서 쓸 수 없어요. 다른 키를 정해 주세요.`;
+    } else {
+      picked = sc;
+      message.textContent = '';
+    }
+    showKey();
+  }
+  keyBtn.addEventListener('click', () => {
+    if (listening) return;
+    setListening(true);
+    showKey();
+    window.addEventListener('keydown', onKey, true);
+  });
+  showKey();
+
+  const form = el('form', { class: 'auth-form', novalidate: '' },
+    el('label', { class: 'jump-label', text: '① 이동할 사이트' }),
+    urlInput,
+    el('span', { class: 'jump-hint', text: '이 키를 누르면 이 사이트로 바로 바뀌어요. 예: 클래스룸, 구글 문서, 학교 홈페이지' }),
+    el('label', { class: 'jump-label', text: '② 단축키' }),
+    keyBtn,
+    el('span', { class: 'jump-hint', text: 'Ctrl + 키처럼 조합해도 돼요. 글자 키 하나만 정하면 검색창에 글자를 칠 때는 동작하지 않아요.' }),
+    message,
+    el('button', { type: 'submit', class: 'auth-submit' }, el('span', { text: '저장하고 시작하기' })));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const url = cleanJumpUrl(urlInput.value);
+    if (!url) {
+      message.textContent = '이동할 사이트 주소를 확인해 주세요. (예: classroom.google.com)';
+      urlInput.focus();
+      return;
+    }
+    if (!picked) {
+      message.textContent = '단축키를 정해 주세요.';
+      return;
+    }
+    saveJump(picked, url);
+    jump = loadJump();
+    updateJumpInfo();
+    if (location.hash === next) route();
+    else location.hash = next;
+  });
+
+  app.replaceChildren(el('div', { class: 'jump-setup' },
+    authCard('이동 단축키 정하기', '처음 한 번만 정하면 돼요. 정한 키를 누르면 정한 사이트로 바로 이동해요.', form)));
+  urlInput.focus();
+}
+
+window.addEventListener('keydown', (e) => {
+  if (!jump || recordingFor || pickingJumpKey || !matchesShortcut(e, jump.shortcut)) return;
+  if (isTypingKey(jump.shortcut) && isTypingTarget(e.target)) return;
+  e.preventDefault();
+  jumpAway();
+}, true);
+
+// 팝업에서 눌렀을 때
+jumpChannel()?.addEventListener('message', (e) => { if (e.data === 'jump') jumpAway(); });
+
+// 다른 탭에서 바꾸면 여기도 바로 적용
+window.addEventListener('storage', (e) => {
+  if (e.key === JUMP_SHORTCUT_KEY || e.key === JUMP_URL_KEY) {
+    jump = loadJump();
+    updateJumpInfo();
+  }
+});
+
+function updateJumpInfo() {
+  document.getElementById('jumpLabel').textContent = jump ? shortcutLabel(jump.shortcut) : '없음';
+  document.getElementById('jumpUrlLabel').textContent = jump ? jump.url.replace(/^https?:\/\//, '').replace(/\/$/, '') : '정하지 않음';
+}
+
 // ---------- 단축키 (가리기 / 팝업 닫기). 설정에서 바꿀 수 있고 이 브라우저에 저장된다 ----------
 
 let coverShortcut = loadShortcut(COVER_SHORTCUT_KEY, DEFAULT_COVER_SHORTCUT);
@@ -1808,7 +1948,7 @@ let popupShortcut = loadShortcut(POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT);
 let recordingFor = null; // 키를 기다리는 중인 설정 줄
 
 window.addEventListener('keydown', (e) => {
-  if (recordingFor) return;
+  if (recordingFor || pickingJumpKey) return;
   if (!matchesShortcut(e, coverShortcut)) return;
   if (isTypingKey(coverShortcut) && isTypingTarget(e.target)) return;
   e.preventDefault();
@@ -1888,7 +2028,10 @@ document.getElementById('clearHistoryBtn').addEventListener('click', () => {
   updateHistoryInfo();
 });
 
+document.getElementById('jumpChange').addEventListener('click', () => settingsDialog.close());
+
 document.getElementById('settingsBtn').addEventListener('click', () => {
+  updateJumpInfo();
   updateShortcutLabels();
   updateDisguiseUI();
   updateHistoryInfo();

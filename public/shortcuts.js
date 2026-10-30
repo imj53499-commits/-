@@ -2,6 +2,9 @@
 // 키는 e.code 로 비교해서 한/영 상태와 상관없이 같은 키로 동작한다. 설정은 이 브라우저의 localStorage 에 저장된다.
 
 export const COVER_SHORTCUT_KEY = 'exitShortcut';
+// 이동 단축키: 누르면 사용자가 정한 사이트로 바로 이동한다 (처음 유튜브에 들어갈 때 정함)
+export const JUMP_SHORTCUT_KEY = 'jumpShortcut';
+export const JUMP_URL_KEY = 'jumpUrl';
 export const POPUP_SHORTCUT_KEY = 'popupShortcut';
 export const DEFAULT_COVER_SHORTCUT = { code: 'Backquote', ctrl: false, alt: false, shift: false, meta: false };
 export const DEFAULT_POPUP_SHORTCUT = { code: 'KeyQ', ctrl: false, alt: false, shift: false, meta: false };
@@ -27,6 +30,25 @@ export function loadShortcut(storageKey, fallback) {
   } catch {}
   return fallback;
 }
+
+export function loadJump() {
+  try {
+    const url = localStorage.getItem(JUMP_URL_KEY) || '';
+    const sc = JSON.parse(localStorage.getItem(JUMP_SHORTCUT_KEY) || 'null');
+    if (/^https?:\/\//.test(url) && sc && typeof sc.code === 'string') return { shortcut: sc, url };
+  } catch {}
+  return null;
+}
+
+export function saveJump(shortcut, url) {
+  try {
+    localStorage.setItem(JUMP_SHORTCUT_KEY, JSON.stringify(shortcut));
+    localStorage.setItem(JUMP_URL_KEY, url);
+  } catch {}
+}
+
+// 팝업에서 이동 단축키를 누르면 메인 화면에 알린다
+export const jumpChannel = () => (typeof BroadcastChannel === 'function' ? new BroadcastChannel('sy-jump') : null);
 
 export function storeShortcut(storageKey, value) {
   try { localStorage.setItem(storageKey, value ? JSON.stringify(value) : 'off'); } catch {}
