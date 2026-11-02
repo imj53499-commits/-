@@ -42,8 +42,6 @@ function el(tag, props = {}, ...children) {
 
 // 차단된 계정·기기면 서버가 알려 준 안내를 담아 두고 차단 화면만 보여 준다.
 let blockedNotice = '';
-// 로그인 화면에 한 번 띄울 안내 (예: 체험 시간이 끝났을 때)
-let authNotice = '';
 
 const NETWORK_ERROR = '서버에 연결하지 못했어요. 인터넷(와이파이)이 끊겼거나 학교·회사 인터넷이 이 주소를 막았을 수 있어요. 잠시 뒤 다시 해 보거나 다른 인터넷(데이터)으로 해 보세요.';
 
@@ -63,7 +61,6 @@ async function api(path, { method = 'GET', body } = {}) {
   if (!res.ok) {
     // 로그인이 풀렸으면(승인 취소, 만료 등) 로그인 화면으로 돌아간다.
     if ((data.code === 'LOGIN_REQUIRED' || data.code === 'BLOCKED') && me) {
-      if (me.role === 'trial') authNotice = TRIAL_ENDED;
       me = null;
       setTimeout(route, 0);
     }
@@ -200,7 +197,7 @@ function renderLauncher() {
   setTitle();
   setActiveNav('');
   document.body.classList.add('launcher-mode');
-  const name = me?.name || (me?.role === 'trial' ? '' : me?.username) || '';
+  const name = me?.name || me?.username || '';
   const tile = (a) => {
     const iconEl = el('span', { class: 'app-icon', style: `background:${a.color}` });
     iconEl.innerHTML = a.icon;
@@ -215,35 +212,7 @@ function renderLauncher() {
         el('span', { class: 'app-name', text: '곧 추가돼요' })))));
 }
 
-// ---------- 체험 중 남은 시간 ----------
-
-const TRIAL_ENDED = '체험 시간(1시간)이 끝났어요. 계속 쓰려면 가입해 주세요.';
-const trialBar = document.getElementById('trialBar');
 const appTitle = document.getElementById('appTitle');
-let trialTimer = null;
-
-function updateTrialBar() {
-  const on = me?.role === 'trial';
-  trialBar.hidden = !on || document.body.classList.contains('auth-mode');
-  if (!on) {
-    clearInterval(trialTimer);
-    trialTimer = null;
-    return;
-  }
-  const left = me.expiresAt - Date.now();
-  if (left <= 0) {
-    me = null;
-    authNotice = TRIAL_ENDED;
-    clearInterval(trialTimer);
-    trialTimer = null;
-    // 주소가 바뀌면 hashchange 가 route 를 부르므로 한 번만 그리게 한다 (안내 문구는 한 번만 쓰임)
-    if (location.hash !== '#/') location.hash = '#/';
-    else route();
-    return;
-  }
-  trialBar.textContent = `체험 중 · ${Math.ceil(left / 60000)}분 남음 · 가입하기`;
-  if (!trialTimer) trialTimer = setInterval(updateTrialBar, 10000);
-}
 
 async function renderHome(category, token) {
   setTitle('');
@@ -802,21 +771,10 @@ function route() {
 
   if (parts[0] === 'admin') return renderAdmin(token);
   document.body.classList.toggle('auth-mode', !me || !!me.mustChange);
-  updateTrialBar();
   if (parts[0] === 'contact') return renderContact(token);
   if (parts[0] === 'replies') return renderReplies(token);
   if (blockedNotice) return renderBlocked();
-  if (!me) {
-    const notice = authNotice;
-    authNotice = '';
-    return renderAuth(token, 'login', notice);
-  }
-  // 체험 중에 가입하기를 누르면 체험은 그대로 두고 가입 화면만 보여 준다
-  if (parts[0] === 'signup' && me.role === 'trial') {
-    document.body.classList.add('auth-mode');
-    trialBar.hidden = true;
-    return renderAuth(token, 'signup');
-  }
+  if (!me) return renderAuth(token);
   if (me.mustChange) return renderPassword(token, true);
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
 
@@ -1003,30 +961,9 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     }
   });
 
-  // 체험하기: 가입·로그인 없이 1시간 (체험 중에 가입 화면을 연 경우는 빼고)
-  const trialBtn = el('button', { type: 'button', class: 'trial-start', text: '1시간 체험해 보기' });
-  trialBtn.addEventListener('click', async () => {
-    trialBtn.disabled = true;
-    message.className = 'auth-message';
-    message.textContent = '';
-    try {
-      me = await api('/api/auth/trial', { method: 'POST', body: {} });
-      location.hash = '#/';
-      route();
-    } catch (err) {
-      if (err.code === 'BLOCKED') return route();
-      message.textContent = err.message;
-      trialBtn.disabled = false;
-    }
-  });
-  const trialBox = me?.role === 'trial' ? null : el('div', { class: 'trial-box' },
-    el('p', { text: '가입·로그인하기 무서우신가요?' }),
-    trialBtn,
-    el('span', { text: '가입 없이 1시간 동안 써 볼 수 있어요' }));
-
   app.replaceChildren(authCard('School YouTube', signup ? '가입 신청을 하면 관리자가 확인해요' : '다시 오신 걸 환영해요',
     el('div', { class: `auth-tabs${signup ? ' signup' : ''}` }, tab('login', '로그인'), tab('signup', '가입하기')),
-    form, trialBox));
+    form));
   (signup ? realName : (prefill ? password : username)).focus();
   showReplyBanner(token);
 }
@@ -1445,13 +1382,6 @@ const topLogoutBtn = document.getElementById('topLogoutBtn');
 
 function updateAccountUI() {
   accountSection.hidden = !me || me.role === 'guest';
-  if (me?.role === 'trial') {
-    document.getElementById('accountName').textContent = '체험 중 (가입 안 함)';
-    document.getElementById('adminLink').hidden = true;
-    document.getElementById('passwordLink').hidden = true;
-    topLogoutBtn.hidden = false;
-    return;
-  }
   topLogoutBtn.hidden = accountSection.hidden;
   if (!me) return;
   document.getElementById('accountName').textContent = me.name ? `${me.name} (${me.username})` : me.username;

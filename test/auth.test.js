@@ -434,38 +434,10 @@ test('임시 비밀번호는 지문을 남기지 않는다', async () => {
   assert.equal(JSON.parse(env.DB.store.get('user:민수').value).pwf, undefined);
 });
 
-test('체험하기: 로그인 없이 1시간, 한 브라우저에서 하루 한 번', async () => {
-  const t = await call('/api/auth/trial', { method: 'POST', body: {} });
-  assert.equal(t.status, 200);
-  assert.equal(t.body.role, 'trial');
-  assert.ok(Math.abs(t.body.expiresAt - Date.now() - 3600_000) < 5000);
-  const session = t.cookie;
-  assert.match(t.setCookie, /Max-Age=3600/);
-  assert.match(t.setCookie, /sy_trial=1/);
-  assert.equal((await call('/api/search?q=x', { cookie: session })).status, 200);
-  assert.equal((await call('/api/auth/me', { cookie: session })).body.role, 'trial');
-  // 관리자 기능·비밀번호 바꾸기는 안 된다
-  assert.equal((await call('/api/admin/users', { cookie: session })).status, 401);
-  assert.equal((await call('/api/auth/password', { method: 'POST', body: { current: 'a', next: 'bbbbbb' }, cookie: session })).status, 401);
-
-  // 같은 브라우저에서 다시 체험은 안 된다
-  const again = await call('/api/auth/trial', { method: 'POST', body: {}, cookie: 'sy_trial=1' });
-  assert.equal(again.status, 429);
-  assert.equal(again.body.code, 'TRIAL_USED');
-
-  // 1시간이 지나면 끝난다
-  const key = `session:${session.split('=')[1]}`;
-  const data = JSON.parse(env.DB.store.get(key).value);
-  data.expiresAt = Date.now() - 1;
-  env.DB.store.get(key).value = JSON.stringify(data);
-  assert.equal((await call('/api/search?q=x', { cookie: session })).body.code, 'LOGIN_REQUIRED');
-});
-
-test('차단된 기기는 체험도 못 한다', async () => {
-  await signup('민수');
-  const a = await adminLogin();
-  await admin('block', '민수', a.cookie);
-  const device = deviceOf((await login('민수')).setCookie);
-  const res = await call('/api/auth/trial', { method: 'POST', body: {}, cookie: `sy_device=${device}` });
-  assert.equal(res.body.code, 'BLOCKED');
+test('체험하기는 없어졌고, 예전 체험 로그인도 더 이상 안 된다', async () => {
+  assert.equal((await call('/api/auth/trial', { method: 'POST', body: {} })).status, 404);
+  const token = 'a'.repeat(64);
+  await env.DB.put(`session:${token}`, JSON.stringify({ role: 'trial', expiresAt: Date.now() + 3600_000 }));
+  const res = await call('/api/search?q=x', { cookie: `sy_session=${token}` });
+  assert.equal(res.body.code, 'LOGIN_REQUIRED');
 });
