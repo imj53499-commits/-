@@ -84,9 +84,14 @@
     const $ = (id) => document.getElementById(id);
     const view = $('view'), start = $('start'), addr = $('addr'), msg = $('msg');
     let token = null, expiresAt = 0, current = '';
+    // 받은 표는 이 브라우저에 기억해 둔다 (다시 들어와도 서버를 안 기다리고, 주소가 같아서 캐시도 먹힘)
+    try {
+      const saved = JSON.parse(localStorage.getItem('proxyToken') || 'null');
+      if (saved && saved.expiresAt - Date.now() > 10 * 60 * 1000) ({ token, expiresAt } = saved);
+    } catch { /* 저장소를 못 쓰면 매번 받는다 */ }
 
     async function getToken() {
-      if (token && expiresAt - Date.now() > 60 * 1000) return token;
+      if (token && expiresAt - Date.now() > 10 * 60 * 1000) return token;
       const res = await fetch('/api/proxy/token', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -96,6 +101,7 @@
       }
       token = data.token;
       expiresAt = data.expiresAt;
+      try { localStorage.setItem('proxyToken', JSON.stringify({ token, expiresAt })); } catch { /* 괜찮음 */ }
       return token;
     }
 
@@ -142,7 +148,15 @@
 
     // 프록시로 연 페이지가 지금 주소와 제목을 알려 준다
     addEventListener('message', (e) => {
-      if (e.source !== view.contentWindow || e.data?.type !== 'proxy-page') return;
+      if (e.source !== view.contentWindow) return;
+      if (e.data?.type === 'proxy-expired') {
+        if (!token) return;
+        token = null;
+        try { localStorage.removeItem('proxyToken'); } catch { /* 괜찮음 */ }
+        if (current) go(current);
+        return;
+      }
+      if (e.data?.type !== 'proxy-page') return;
       current = String(e.data.url || '');
       if (document.activeElement !== addr) addr.value = current;
     });

@@ -11,7 +11,13 @@
 //   - 이 사이트 쿠키는 다른 사이트로 보내지 않고, 다른 사이트의 쿠키(Set-Cookie)도 받지 않는다.
 //   - localhost, 사설 IP 등 내부 주소는 열지 않는다.
 
-const TOKEN_TTL = 12 * 60 * 60 * 1000; // 12시간
+// 표는 6시간 단위로 끊어서 만든다 (남은 시간 6~12시간). 같은 시간대엔 표가 같아서 프록시 주소도 같고,
+// 그래서 브라우저 캐시가 그대로 먹힌다 (표가 매번 바뀌면 그림·CSS 를 매번 새로 받아서 느림).
+const TOKEN_STEP = 6 * 60 * 60 * 1000;
+// 그림·CSS·JS·글꼴은 Cloudflare 와 브라우저에 하루 동안 저장해 두고 다시 쓴다
+const STATIC_DEST = new Set(['image', 'style', 'script', 'font', 'audio', 'video', 'track', 'manifest']);
+const STATIC_TYPE = /^(image|font|audio|video)\/|^text\/css|javascript|^application\/(wasm|font)/;
+const STATIC_TTL = 24 * 60 * 60;
 export const PREFIX = '/p/';
 
 const SANDBOX_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock';
@@ -42,7 +48,7 @@ export async function checkToken(secret, token, now = Date.now()) {
 // 로그인한 사람에게 표를 준다 (server.js 에서 세션 확인 뒤 부름)
 export async function tokenResponse(env, session) {
   if (!env.ADMIN_PASSWORD) return jsonRes({ error: '프록시를 쓰려면 ADMIN_PASSWORD 를 설정해야 해요.' }, 503);
-  let expiresAt = Date.now() + TOKEN_TTL;
+  let expiresAt = Math.ceil((Date.now() + TOKEN_STEP) / TOKEN_STEP) * TOKEN_STEP;
   if (session.role === 'trial') expiresAt = Math.min(expiresAt, session.expiresAt);
   return jsonRes({ token: await makeToken(env.ADMIN_PASSWORD, expiresAt), expiresAt });
 }
@@ -215,11 +221,11 @@ function rewriteHtml(res, target, prefix) {
 
 // ---------- 안내 페이지 ----------
 
-function notice(message, status) {
+function notice(message, status, script = '') {
   const html = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Google</title>
 <style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;color:#333;background:#fff}
 @media(prefers-color-scheme:dark){body{background:#0f0f0f;color:#eee}}div{max-width:420px;padding:24px;text-align:center;line-height:1.6}</style></head>
-<body><div><p>${message}</p></div></body></html>`;
+<body><div><p>${message}</p></div>${script}</body></html>`;
   return new Response(html, {
     status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': SANDBOX_CSP }
   });
@@ -250,7 +256,9 @@ export async function handleProxy(request, env, fetchFn = fetch) {
   const parsed = parseProxyUrl(url);
   if (!parsed) return notice('주소가 올바르지 않아요.', 400);
   if (!(await checkToken(env.ADMIN_PASSWORD, parsed.token))) {
-    return notice('프록시 사용 시간이 끝났어요. 앱 목록에서 프록시를 다시 열어 주세요.', 403);
+    // 바깥 화면(/apps/proxy/)이 이걸 받으면 새 표를 받아서 다시 연다
+    return notice('프록시 사용 시간이 끝났어요. 앱 목록에서 프록시를 다시 열어 주세요.', 403,
+      `<script>parent!==window&&parent.postMessage({type:'proxy-expired'},'*')</script>`);
   }
   const { target } = parsed;
   if (isBlockedHost(target.hostname) || target.host === url.host) return notice('이 주소는 열 수 없어요.', 403);
@@ -265,13 +273,18 @@ export async function handleProxy(request, env, fetchFn = fetch) {
   headers.set('referer', target.origin + '/');
   if (!['GET', 'HEAD'].includes(request.method)) headers.set('origin', target.origin);
 
+  // 그림·CSS·JS 같은 요청은 Cloudflare 캐시에 오래 둔다 (이 사이트 쿠키를 안 보내니 누구에게나 같은 내용)
+  const dest = request.headers.get('sec-fetch-dest') || '';
+  const isStatic = request.method === 'GET' && !headers.has('range') &&
+    (STATIC_DEST.has(dest) || /\.(png|jpe?g|gif|webp|avif|svg|ico|css|js|mjs|woff2?|ttf|otf)$/i.test(target.pathname));
   let upstream;
   try {
     upstream = await fetchFn(target.href, {
       method: request.method,
       headers,
       body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
-      redirect: 'manual'
+      redirect: 'manual',
+      ...(isStatic ? { cf: { cacheEverything: true, cacheTtlByStatus: { '200-299': STATIC_TTL, '404': 300, '500-599': 0 } } } : {})
     });
   } catch {
     return notice(`${escapeHtml(target.host)} 에 연결하지 못했어요. 주소를 확인하거나 잠시 뒤 다시 해 보세요.`, 502);
@@ -289,6 +302,11 @@ export async function handleProxy(request, env, fetchFn = fetch) {
   if (loc) out.set('location', proxify(loc, target.href, prefix));
 
   const type = (upstream.headers.get('content-type') || '').toLowerCase();
+  // 브라우저도 다시 받지 않게: 원래 사이트가 캐시 시간을 안 줬거나 막아 뒀으면 하루로 정한다
+  if (upstream.status === 200 && isStatic && STATIC_TYPE.test(type)) {
+    const cc = (upstream.headers.get('cache-control') || '').toLowerCase();
+    if (!/max-age=[1-9]/.test(cc) || /no-store|no-cache|private/.test(cc)) out.set('Cache-Control', `public, max-age=${STATIC_TTL}`);
+  }
   const init = { status: upstream.status, statusText: upstream.statusText, headers: out };
   if (upstream.status >= 300 && upstream.status < 400 || request.method === 'HEAD' || !upstream.body) {
     return new Response(upstream.status === 204 || upstream.status === 304 || request.method === 'HEAD' ? null : upstream.body, init);

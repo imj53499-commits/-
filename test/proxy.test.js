@@ -81,3 +81,27 @@ test('handleProxy: 다른 곳으로 보내기(redirect) 주소도 바꾼다', as
   assert.equal(res.status, 301);
   assert.equal(res.headers.get('location'), `/p/${tok}/https/www.example.com/`);
 });
+
+test('표는 6시간 단위라 같은 시간대엔 같고, 6~12시간 남는다', async () => {
+  const { tokenResponse } = await import('../src/proxy.js');
+  const env = { ADMIN_PASSWORD: 'pw' };
+  const a = await (await tokenResponse(env, { role: 'user' })).json();
+  const b = await (await tokenResponse(env, { role: 'user' })).json();
+  assert.equal(a.token, b.token);
+  const left = a.expiresAt - Date.now();
+  assert.ok(left > 6 * 3600e3 - 1000 && left <= 12 * 3600e3, String(left));
+});
+
+test('그림은 캐시 시간을 붙이고, 페이지(HTML 아님)·API 응답은 그대로 둔다', async () => {
+  const env = { DB: {}, ADMIN_PASSWORD: 'pw' };
+  const tok = await makeToken('pw', Date.now() + 60000);
+  let init = null;
+  const img = await handleProxy(new Request(`https://me.dev/p/${tok}/https/example.com/a.png`, { headers: { 'sec-fetch-dest': 'image' } }), env,
+    async (u, i) => { init = i; return new Response('x', { headers: { 'content-type': 'image/png', 'cache-control': 'no-cache' } }); });
+  assert.equal(img.headers.get('cache-control'), 'public, max-age=86400');
+  assert.equal(init.cf.cacheEverything, true);
+  const apiRes = await handleProxy(new Request(`https://me.dev/p/${tok}/https/example.com/api`, { headers: { 'sec-fetch-dest': 'empty' } }), env,
+    async (u, i) => { init = i; return new Response('{}', { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }); });
+  assert.equal(apiRes.headers.get('cache-control'), 'no-store');
+  assert.equal(init.cf, undefined);
+});
