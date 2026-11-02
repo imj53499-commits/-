@@ -1381,7 +1381,7 @@ const accountSection = document.getElementById('accountSection');
 const topLogoutBtn = document.getElementById('topLogoutBtn');
 
 function updateAccountUI() {
-  accountSection.hidden = !me || me.role === 'guest';
+  accountSection.hidden = !me;
   topLogoutBtn.hidden = accountSection.hidden;
   if (!me) return;
   document.getElementById('accountName').textContent = me.name ? `${me.name} (${me.username})` : me.username;
@@ -1411,8 +1411,8 @@ async function loadMe() {
   try {
     me = await api('/api/auth/me');
   } catch (err) {
-    // 로그인 기능을 아직 설정하지 않은 사이트는 로그인 없이 그대로 쓴다.
-    me = err.code === 'NO_DB' ? { username: '', role: 'guest' } : null;
+    // 로그인이 안 돼 있으면(로그인 기능을 설정하지 않은 사이트 포함) 로그인 화면만 보여 준다.
+    me = null;
   }
 }
 

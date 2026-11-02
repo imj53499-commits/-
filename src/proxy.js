@@ -48,8 +48,7 @@ export async function checkToken(secret, token, now = Date.now()) {
 // 로그인한 사람에게 표를 준다 (server.js 에서 세션 확인 뒤 부름)
 export async function tokenResponse(env, session) {
   if (!env.ADMIN_PASSWORD) return jsonRes({ error: '프록시를 쓰려면 ADMIN_PASSWORD 를 설정해야 해요.' }, 503);
-  let expiresAt = Math.ceil((Date.now() + TOKEN_STEP) / TOKEN_STEP) * TOKEN_STEP;
-  if (session.role === 'trial') expiresAt = Math.min(expiresAt, session.expiresAt);
+  const expiresAt = Math.ceil((Date.now() + TOKEN_STEP) / TOKEN_STEP) * TOKEN_STEP;
   return jsonRes({ token: await makeToken(env.ADMIN_PASSWORD, expiresAt), expiresAt });
 }
 
