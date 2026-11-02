@@ -4,6 +4,7 @@
 
 - 앱 목록: 들어가면 처음에 앱 목록이 나오고, 여기서 School YouTube 를 고름 (왼쪽 위 ⋮⋮⋮ 버튼으로 언제든 돌아옴). 앱을 더 넣으려면 `public/app.js` 의 `APPS` 에 추가
 - 체스 (지금은 꺼 둠, `public/app.js` 의 `APPS` 에서 체스의 `off: true` 를 지우면 켜짐): 컴퓨터랑 두기 (Stockfish, 1~10단계, 무르기·힌트, 이 브라우저에서 계산), 한 화면에서 둘이 두기, 친구랑 온라인 대결 (방 만들기 → 6자리 코드·링크로 참여, 공개 방 목록, 시간 제한, 무승부 제안, 기권, 한 판 더, 구경하기). 온라인 대결은 아래 'D1 연결'이 필요함
+- 프록시 (`/apps/proxy/`): 주소나 검색어를 넣으면 그 사이트를 이 서버(`/p/*`)를 거쳐서 보여 줌. 로그인한 사람만 (12시간짜리 표, 체험은 체험 끝날 때까지). 연 페이지는 sandbox 로 격리돼 이 사이트 쿠키·로그인을 못 건드리고, 이 사이트 쿠키를 다른 사이트로 보내지도 않음. 내부 주소(localhost, 사설 IP)는 안 열림. 다른 사이트 로그인(쿠키)·localStorage 가 필요한 곳, 무거운 앱(유튜브·구글 검색 등)은 잘 안 될 수 있음 (`src/proxy.js`)
 - 체험하기: 로그인·가입 화면의 '1시간 체험해 보기'로 가입 없이 1시간 동안 쓸 수 있음 (오른쪽 아래에 남은 시간, 끝나면 로그인 화면으로). 한 브라우저에서 하루에 한 번, 한 연결(IP)당 1시간에 30번까지. 차단된 기기는 체험도 안 됨
 - 홈(YouTube): 앱 목록에서 들어가면 인기/추천 영상 목록 (카테고리: 음악, 게임, 뉴스, 스포츠 …). 카테고리마다 여러 검색어를 들어올 때마다 다른 순서로 써서 사람마다·방문마다 다른 영상이 나오고, 아래로 내리면 계속 더 불러옴 (무한 스크롤)
 - 추천: 최근 본 영상 2개의 관련 영상을 (아래로 내릴수록 그 전에 본 영상들 순서로) 홈(전체)에 인기 영상과 섞어서 보여 줌. 본 영상은 다시 안 나옴. 시청 기록은 브라우저에만 저장 (⚙에서 지우기, 본 쇼츠 목록과 이어보기 위치도 같이 지워짐)
@@ -81,6 +82,7 @@ npm test
 | `src/server.js` | `/api/*` 입구: 로그인 확인 후 영상 API 로 전달 |
 | `src/auth.js` | 가입, 로그인, 세션, 관리자 승인·차단, 문의함, 비밀번호 초기화·변경 (KV 저장) |
 | `src/api.js` | API 라우트 (`/api/home`, `/api/recommend`, `/api/comments`, `/api/shorts`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
+| `src/proxy.js`, `functions/p/[[path]].js` | 웹 프록시 (`/p/<표>/https/<사이트>/...`, `/api/proxy/token`), 화면은 `public/apps/proxy/index.html` |
 | `src/chess.js` | 온라인 체스 방 (`/api/chess/*`, D1 저장) |
 | `public/chess-app.js` | 체스 화면 (판, 컴퓨터, 온라인 방) |
 | `public/vendor/` | chess.js (BSD-2), Stockfish.js 10 (GPL, `stockfish/COPYING.txt`), 체스 말 그림 `pieces.svg` (Cburnett, CC BY-SA 3.0, Wikimedia Commons) |

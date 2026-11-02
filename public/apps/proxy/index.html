@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Google</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none' stroke='%239aa0a6' stroke-width='2.2'%3E%3Ccircle cx='16' cy='16' r='12'/%3E%3Cpath d='M4 16h24M16 4c4 4 4 20 0 24M16 4c-4 4-4 20 0 24'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #ffffff; --bg-soft: #f2f2f2; --bg-hover: #e5e5e5; --text: #0f0f0f; --text-sub: #606060;
+      --border: #e0e0e0; --accent: #6366f1;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0f0f0f; --bg-soft: #222222; --bg-hover: #333333; --text: #f1f1f1; --text-sub: #aaaaaa; --border: #303030; }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; display: flex; flex-direction: column; }
+    .bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--bg); }
+    .btn { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; border: 0; background: transparent; color: inherit; cursor: pointer; text-decoration: none; }
+    .btn:hover { background: var(--bg-hover); }
+    .btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    form.addr { flex: 1; min-width: 0; display: flex; }
+    .addr input { width: 100%; height: 38px; padding: 0 16px; border-radius: 19px; border: 1px solid var(--border); background: var(--bg-soft); color: inherit; font-size: 15px; outline: none; }
+    .addr input:focus { border-color: var(--accent); background: var(--bg); }
+    main { flex: 1; position: relative; min-height: 0; }
+    iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+    .start { position: absolute; inset: 0; overflow: auto; padding: 48px 16px; text-align: center; }
+    .start h1 { margin: 0 0 8px; font-size: 26px; }
+    .start p { margin: 0 0 24px; color: var(--text-sub); line-height: 1.6; }
+    .big { max-width: 560px; margin: 0 auto 28px; display: flex; }
+    .big input { flex: 1; min-width: 0; height: 48px; padding: 0 20px; border-radius: 24px; border: 1px solid var(--border); background: var(--bg-soft); color: inherit; font-size: 16px; outline: none; }
+    .big input:focus { border-color: var(--accent); background: var(--bg); }
+    .links { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 560px; margin: 0 auto; }
+    .links button { padding: 10px 16px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg); color: inherit; font-size: 14px; cursor: pointer; }
+    .links button:hover { background: var(--bg-hover); }
+    .msg { color: var(--text-sub); }
+    .msg a { color: var(--accent); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <a class="btn" href="/#/" title="앱 목록" aria-label="앱 목록">
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </a>
+    <button class="btn" id="homeBtn" title="처음 화면" aria-label="처음 화면">
+      <svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+    </button>
+    <button class="btn" id="reloadBtn" title="새로고침" aria-label="새로고침">
+      <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
+    </button>
+    <form class="addr" id="addrForm">
+      <input id="addr" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="주소나 검색어 입력">
+    </form>
+    <button class="btn" id="tabBtn" title="새 탭에서 열기" aria-label="새 탭에서 열기">
+      <svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+    </button>
+  </div>
+  <main>
+    <div class="start" id="start">
+      <h1>프록시</h1>
+      <p>보고 싶은 사이트 주소나 검색어를 넣으세요.<br>모든 요청이 이 서버를 거쳐서 열려요.</p>
+      <form class="big" id="bigForm"><input id="bigInput" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="예: ko.wikipedia.org 또는 검색어" autofocus></form>
+      <div class="links" id="links"></div>
+      <p class="msg" id="msg" hidden></p>
+    </div>
+    <iframe id="view" hidden title="프록시 화면"
+      sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock"
+      allow="fullscreen; autoplay; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>
+  </main>
+  <script>
+    // 로그인한 사람만 쓸 수 있다. /api/proxy/token 에서 받은 표로 /p/<표>/https/<사이트>/... 주소를 만든다.
+    const SEARCH = 'https://html.duckduckgo.com/html/?q=';
+    const QUICK = [
+      ['DuckDuckGo', 'https://html.duckduckgo.com/html/'],
+      ['위키백과', 'https://ko.wikipedia.org/'],
+      ['나무위키', 'https://namu.wiki/'],
+      ['네이버', 'https://m.naver.com/'],
+      ['Reddit', 'https://old.reddit.com/']
+    ];
+    const $ = (id) => document.getElementById(id);
+    const view = $('view'), start = $('start'), addr = $('addr'), msg = $('msg');
+    let token = null, expiresAt = 0, current = '';
+
+    async function getToken() {
+      if (token && expiresAt - Date.now() > 60 * 1000) return token;
+      const res = await fetch('/api/proxy/token', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.error || '프록시를 열지 못했어요.');
+        err.login = res.status === 401 || data.code === 'LOGIN_REQUIRED' || data.code === 'BLOCKED';
+        throw err;
+      }
+      token = data.token;
+      expiresAt = data.expiresAt;
+      return token;
+    }
+
+    // "naver.com" → https://naver.com/, "고양이" → 검색
+    function toUrl(text) {
+      const s = text.trim();
+      if (!s) return '';
+      if (/^https?:\/\//i.test(s)) return s;
+      if (!/\s/.test(s) && /^[^/]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(s)) return 'https://' + s;
+      return SEARCH + encodeURIComponent(s);
+    }
+
+    function proxyPath(url, tok) {
+      const u = new URL(url);
+      return `/p/${tok}/${u.protocol.slice(0, -1)}/${u.host}${u.pathname}${u.search}${u.hash}`;
+    }
+
+    function showMessage(text, login) {
+      view.hidden = true;
+      start.hidden = false;
+      msg.hidden = false;
+      msg.textContent = text + ' ';
+      if (login) {
+        const a = document.createElement('a');
+        a.href = '/#/';
+        a.textContent = '로그인하러 가기';
+        msg.append(a);
+      }
+    }
+
+    async function go(text) {
+      const url = toUrl(text);
+      if (!url) return;
+      try { new URL(url); } catch { return showMessage('주소가 올바르지 않아요.'); }
+      let tok;
+      try { tok = await getToken(); } catch (e) { return showMessage(e.message, e.login); }
+      current = url;
+      addr.value = url;
+      msg.hidden = true;
+      start.hidden = true;
+      view.hidden = false;
+      view.src = proxyPath(url, tok);
+    }
+
+    // 프록시로 연 페이지가 지금 주소와 제목을 알려 준다
+    addEventListener('message', (e) => {
+      if (e.source !== view.contentWindow || e.data?.type !== 'proxy-page') return;
+      current = String(e.data.url || '');
+      if (document.activeElement !== addr) addr.value = current;
+    });
+
+    $('addrForm').addEventListener('submit', (e) => { e.preventDefault(); addr.blur(); go(addr.value); });
+    $('bigForm').addEventListener('submit', (e) => { e.preventDefault(); go($('bigInput').value); });
+    $('reloadBtn').addEventListener('click', () => { if (current) go(current); });
+    $('homeBtn').addEventListener('click', () => {
+      view.hidden = true; view.removeAttribute('src'); start.hidden = false; addr.value = ''; current = '';
+      $('bigInput').focus();
+    });
+    $('tabBtn').addEventListener('click', async () => {
+      if (!current) return;
+      try { window.open(proxyPath(current, await getToken()), '_blank', 'noopener'); } catch (e) { showMessage(e.message, e.login); }
+    });
+    for (const [name, url] of QUICK) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = name;
+      b.addEventListener('click', () => go(url));
+      $('links').append(b);
+    }
+    // 들어올 때 로그인돼 있는지 미리 확인
+    getToken().catch((e) => showMessage(e.message, e.login));
+  </script>
+</body>
+</html>

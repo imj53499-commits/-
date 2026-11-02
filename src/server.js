@@ -1,6 +1,7 @@
 import { handleApi } from './api.js';
 import { handleAuth, getSession, blockDevice, deviceBlockResponse, json } from './auth.js';
 import { handleChess } from './chess.js';
+import { tokenResponse } from './proxy.js';
 
 // /api/* 요청의 입구. 계정 관련 요청은 auth 로, 나머지(영상 API)는 승인된 사용자만 쓸 수 있다.
 // KV 저장소(DB)를 아직 연결하지 않았으면 로그인 없이 지금처럼 열어 두고, 연결하는 순간부터 로그인이 필요해진다.
@@ -28,5 +29,7 @@ export async function handleRequest(request, env, yt) {
     return json({ error: '로그인이 필요해요.', code: 'LOGIN_REQUIRED' }, 401);
   }
   if (isChess) return handleChess(request, env, session);
+  // 프록시 앱: 로그인한 사람에게 /p/* 주소에 쓸 표를 준다
+  if (url.pathname === '/api/proxy/token') return tokenResponse(env, session);
   return handleApi(url, yt);
 }
