@@ -158,13 +158,21 @@ var del=parts.some(function(p){p=p.trim().toLowerCase();return p==='max-age=0'||
 if(del)delete J[k];else J[k]=val}})}catch(e2){}}
 try{if(window.indexedDB)indexedDB.open('__t').onerror=function(){}}catch(e){try{Object.defineProperty(window,'indexedDB',{value:undefined,configurable:true})}catch(e2){}}
 var PX=new RegExp('^/p/[^/]+/(https?)/(.+)$');
-function base(){var m=PX.exec(location.pathname);return m?m[1]+'://'+m[2]+location.search:T}
+var TU=new URL(T),TO=TU.origin,ROOT=P+TU.protocol.slice(0,-1)+'/'+TU.host,HR=history.replaceState,HP=history.pushState;
+// 주소창 경로를 원래 사이트 경로(/webtoon 등)로 바꿔 둔다. 화면을 경로로 고르는 앱(React 등)이 제 페이지를 알아보게.
+try{if(PX.test(location.pathname))HR.call(history,history.state,'',TU.pathname+TU.search+location.hash)}catch(e){}
+function base(){var m=PX.exec(location.pathname);return m?m[1]+'://'+m[2]+location.search:TO+location.pathname+location.search}
+// 새로고침하거나 앱이 location 으로 다른 경로로 가면 이 사이트의 404 페이지가 window.name 을 보고 프록시로 되돌린다
+function mark(){try{window.name='__px:'+JSON.stringify({r:ROOT,t:Date.now()})}catch(e){}}
+mark();addEventListener('pagehide',mark);
 function px(r){try{var s=String(r);if(!s||/^(#|javascript:|data:|blob:|mailto:|tel:|about:)/i.test(s))return r;
 if(s.indexOf(O+'/p/')===0?PX.test(s.slice(O.length).split('?')[0]):PX.test(s.split('?')[0]))return r;var B=base(),u=new URL(s,B);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,B);
 if(!/^https?:$/.test(u.protocol))return r;return P+u.protocol.slice(0,-1)+'/'+u.host+u.pathname+u.search+u.hash}catch(e){return r}}
 window.__px=px;
-var f=window.fetch;if(f)window.fetch=function(i,o){try{if(typeof i==='string'||i instanceof URL)i=px(String(i));else if(i&&i.url)i=new Request(px(i.url),i)}catch(e){}return f.call(this,i,o)};
-var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){arguments[1]=px(u);return xo.apply(this,arguments)};
+var f=window.fetch;if(f)window.fetch=function(i,o){try{if(typeof i==='string'||i instanceof URL)i=px(String(i));else if(i&&i.url)i=new Request(px(i.url),i)}catch(e){}
+var w=typeof i==='string'?i:(i&&i.url)||'';return f.call(this,i,o).then(function(r){if(r.status>=400)note('요청 실패 '+r.status+': '+w);return r},function(e){note('요청 실패: '+w);throw e})};
+var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){arguments[1]=px(u);var w=arguments[1],x=this;
+if(!x.__pxl){x.__pxl=1;x.addEventListener('loadend',function(){if(x.status>=400||x.status===0)note('요청 실패 '+(x.status||'')+': '+x.__pxw)})}x.__pxw=w;return xo.apply(this,arguments)};
 var wo=window.open;window.open=function(u){if(u)arguments[0]=px(u);return wo.apply(this,arguments)};
 if(navigator.sendBeacon){var sb=navigator.sendBeacon.bind(navigator);navigator.sendBeacon=function(u,d){return sb(px(u),d)}}
 try{navigator.serviceWorker&&Object.defineProperty(navigator,'serviceWorker',{get:function(){return undefined}})}catch(e){}
@@ -175,7 +183,9 @@ hook(window.HTMLSourceElement,'src');hook(window.HTMLMediaElement,'src');hook(wi
 hook(window.HTMLEmbedElement,'src');hook(window.HTMLVideoElement,'poster');
 var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){var l=String(n).toLowerCase();
 if(l==='src'||l==='action'||l==='poster'||l==='formaction'||(l==='href'&&!(this instanceof SVGElement)))v=px(v);return sa.call(this,n,v)};
-['pushState','replaceState'].forEach(function(n){var o=history[n];history[n]=function(st,t,u){if(u!=null)arguments[2]=px(u);var r=o.apply(this,arguments);tell();return r}});
+function local(u){try{var s=String(u),x=new URL(s,base());if(x.origin===O){var m=PX.exec(x.pathname);if(!m)return s;x=new URL(m[1]+'://'+m[2]+x.search+x.hash)}
+return x.origin===TO?x.pathname+x.search+x.hash:s}catch(e){return u}}
+[['pushState',HP],['replaceState',HR]].forEach(function(a){history[a[0]]=function(st,t,u){if(u!=null)arguments[2]=local(u);var r=a[1].apply(this,arguments);tell();return r}});
 var A=['src','href','action','poster','data'];
 function fix(el){if(!el||el.nodeType!==1)return;for(var i=0;i<A.length;i++){var a=A[i];if(el.hasAttribute&&el.hasAttribute(a)){var v=el.getAttribute(a),n=px(v);if(n!==v)el.setAttribute(a,n)}}
 if(el.hasAttribute&&el.hasAttribute('integrity'))el.removeAttribute('integrity')}
@@ -195,7 +205,7 @@ if(window.top===window)(function add(){if(!document.body)return setTimeout(add,5
 h.style.cssText='position:fixed;right:14px;bottom:14px;z-index:2147483647';var sh=h.attachShadow?h.attachShadow({mode:'closed'}):h;
 var a=document.createElement('a');a.href='/apps/proxy/';a.textContent='← 프록시';a.title='프록시 화면으로';
 a.setAttribute('style','display:block;padding:9px 14px;border-radius:20px;background:#6366f1;color:#fff;font:600 14px system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:.85');
-sa.call(a,'href','/apps/proxy/');sh.appendChild(a);document.body.appendChild(h)})();
+sa.call(a,'href','/apps/proxy/');a.addEventListener('click',function(){window.name='';removeEventListener('pagehide',mark)});sh.appendChild(a);document.body.appendChild(h)})();
 })();</script>`;
 }
 
