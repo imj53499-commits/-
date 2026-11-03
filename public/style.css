@@ -589,9 +589,9 @@ body.shorts-mode .content { padding-bottom: 0; }
 }
 
 /* 큰 휴대폰 가로 / 태블릿: 2열 */
-/* 좁은 휴대폰: 상단 버튼(검색·테마·설정·로그아웃·나가기)이 다 들어가도록 로고 글자는 숨긴다 */
+/* 좁은 휴대폰: 상단 버튼이 다 들어가도록 앱 목록 버튼은 숨긴다 (로고를 누르면 같은 처음 화면으로 감) */
 @media (max-width: 430px) {
-  .logo-text { display: none; }
+  .apps-btn { display: none !important; }
 }
 
 @media (min-width: 561px) and (max-width: 800px) {
@@ -614,7 +614,7 @@ body.shorts-mode .content { padding-bottom: 0; }
 
 /* 앱 목록 (처음 화면) */
 body.launcher-mode .sidebar, body.launcher-mode .search, body.launcher-mode .search-open-btn,
-body.launcher-mode .logo, body.launcher-mode #menuBtn, body.launcher-mode .apps-btn { display: none !important; }
+body.launcher-mode #menuBtn, body.launcher-mode .apps-btn { display: none !important; }
 body.launcher-mode .content, body.launcher-mode.sidebar-collapsed .content { padding-left: 24px; padding-right: 24px; }
 .launcher { max-width: 760px; margin: 0 auto; padding: 48px 0 40px; }
 .launcher-title { margin: 0 0 28px; font-size: 26px; text-align: center; }
@@ -639,7 +639,7 @@ a.app-tile:hover { background: var(--bg-hover); }
 .app-title { display: none; font-size: 18px; font-weight: 700; }
 body.app-mode .app-title { display: inline; }
 body.app-mode .sidebar, body.app-mode .search, body.app-mode .search-open-btn,
-body.app-mode .logo, body.app-mode #menuBtn { display: none !important; }
+body.app-mode #menuBtn { display: none !important; }
 body.app-mode .content, body.app-mode.sidebar-collapsed .content { padding-left: 24px; padding-right: 24px; }
 @media (max-width: 800px) {
   body.app-mode .content { padding: var(--topbar-h) 10px 24px; }
