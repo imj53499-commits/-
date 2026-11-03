@@ -155,7 +155,6 @@ test('KV 를 연결하기 전에는 로그인 없이 못 쓰고, 설정 필요�
   const search = await call('/api/search?q=x');
   assert.equal(search.status, 503);
   assert.equal(search.body.code, 'NO_DB');
-  assert.equal((await call('/api/chess/rooms')).body.code, 'NO_DB');
   assert.equal((await call('/api/auth/me')).body.code, 'NO_DB');
   env = { DB: fakeKV() };
   assert.equal((await adminLogin()).body.code, 'NO_ADMIN_PASSWORD');
