@@ -92,3 +92,14 @@ test('설정은 관리자만 보고 바꿀 수 있고, 로그인 안 하면 확�
   assert.equal((await call(admin, '/api/admin/apps', { id: 'Bad Id!', mode: 'none' })).status, 400);
   assert.equal((await call(admin, '/api/admin/apps', { id: 'game', mode: 'maybe' })).status, 400);
 });
+
+test('프록시를 안 보이게 하면 프록시 표도 못 받는다', async () => {
+  const admin = await adminCookie();
+  const a = await userCookie('minsu');
+  assert.equal((await call(a, '/api/proxy/token', {})).status, 200);
+  await call(admin, '/api/admin/apps', { id: 'proxy', mode: 'none' });
+  const res = await call(a, '/api/proxy/token', {});
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'APP_HIDDEN');
+  assert.equal((await call(admin, '/api/proxy/token', {})).status, 200);
+});

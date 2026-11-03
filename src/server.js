@@ -26,8 +26,13 @@ export async function handleRequest(request, env, yt) {
     return json({ error: '로그인이 필요해요.', code: 'LOGIN_REQUIRED' }, 401);
   }
   if (isApps) return handleApps(request, env, session);
-  // 프록시 앱: 로그인한 사람에게 /p/* 주소에 쓸 표를 준다
-  if (url.pathname === '/api/proxy/token') return tokenResponse(env, session);
+  // 프록시 앱: 로그인한 사람에게 /p/* 주소에 쓸 표를 준다 (프록시 앱을 볼 수 없는 사람은 못 받음)
+  if (url.pathname === '/api/proxy/token') {
+    if (!canUseApp(await loadAccess(env), session, 'proxy')) {
+      return json({ error: '이 앱은 쓸 수 없어요. 관리자에게 문의해 주세요.', code: 'APP_HIDDEN' }, 403);
+    }
+    return tokenResponse(env, session);
+  }
   // 유튜브 앱을 볼 수 없는 사람은 영상 API 도 못 쓴다
   if (!canUseApp(await loadAccess(env), session, 'youtube')) {
     return json({ error: '이 앱은 쓸 수 없어요. 관리자에게 문의해 주세요.', code: 'APP_HIDDEN' }, 403);
