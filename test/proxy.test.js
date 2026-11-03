@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { proxify, rewriteCss, rewriteSrcset, isBlockedHost, parseProxyUrl, makeToken, checkToken, handleProxy } from '../src/proxy.js';
 
 const P = '/p/tok/';
+const X = (origin) => 'x/' + Buffer.from(origin).toString('base64url');
 const BASE = 'https://example.com/dir/page.html';
 
 test('proxify: 상대·절대·루트 주소를 프록시 주소로', () => {
-  assert.equal(proxify('img/a.png', BASE, P), '/p/tok/https/example.com/dir/img/a.png');
-  assert.equal(proxify('/x?y=1', BASE, P), '/p/tok/https/example.com/x?y=1');
-  assert.equal(proxify('//cdn.net/a.js', BASE, P), '/p/tok/https/cdn.net/a.js');
-  assert.equal(proxify('http://other.org/', BASE, P), '/p/tok/http/other.org/');
+  assert.equal(proxify('img/a.png', BASE, P), `/p/tok/${X('https://example.com')}/dir/img/a.png`);
+  assert.equal(proxify('/x?y=1', BASE, P), `/p/tok/${X('https://example.com')}/x?y=1`);
+  assert.equal(proxify('//cdn.net/a.js', BASE, P), `/p/tok/${X('https://cdn.net')}/a.js`);
+  assert.equal(proxify('http://other.org/', BASE, P), `/p/tok/${X('http://other.org')}/`);
+  assert.doesNotMatch(proxify('https://comic.naver.com/webtoon', BASE, P), /naver/);
   for (const keep of ['#top', 'javascript:void 0', 'data:image/png;base64,AA', 'mailto:a@b.c', '/p/tok/https/a.com/']) {
     assert.equal(proxify(keep, BASE, P), keep);
   }
@@ -17,10 +19,10 @@ test('proxify: 상대·절대·루트 주소를 프록시 주소로', () => {
 
 test('CSS·srcset 바꾸기', () => {
   assert.equal(rewriteCss('a{background:url("b.png")} @import "c.css";', BASE, P),
-    'a{background:url("/p/tok/https/example.com/dir/b.png")} @import "/p/tok/https/example.com/dir/c.css";');
+    `a{background:url("/p/tok/${X('https://example.com')}/dir/b.png")} @import "/p/tok/${X('https://example.com')}/dir/c.css";`);
   assert.equal(rewriteCss('url(data:x)', BASE, P), 'url(data:x)');
   assert.equal(rewriteSrcset('a.png 1x, /b.png 2x', BASE, P),
-    '/p/tok/https/example.com/dir/a.png 1x, /p/tok/https/example.com/b.png 2x');
+    `/p/tok/${X('https://example.com')}/dir/a.png 1x, /p/tok/${X('https://example.com')}/b.png 2x`);
 });
 
 test('내부 주소는 막는다', () => {
@@ -67,7 +69,7 @@ test('handleProxy: 표가 없으면 막고, 쿠키는 안 보내고, 응답에 s
   assert.equal(res.headers.get('set-cookie'), null);
   assert.equal(res.headers.get('x-frame-options'), null);
   assert.match(res.headers.get('content-security-policy'), /^sandbox /);
-  assert.equal(await res.text(), `body{background:url(/p/${tok}~https~example.com/https/example.com/bg.png)}`);
+  assert.equal(await res.text(), `body{background:url(/p/${tok}~${X('https://example.com').slice(2)}/${X('https://example.com')}/bg.png)}`);
 
   const local = await handleProxy(new Request(`https://me.dev/p/${tok}/http/127.0.0.1/`), env, fake);
   assert.equal(local.status, 403);
@@ -79,7 +81,7 @@ test('handleProxy: 다른 곳으로 보내기(redirect) 주소도 바꾼다', as
   const res = await handleProxy(new Request(`https://me.dev/p/${tok}/https/example.com/`), env,
     async () => new Response(null, { status: 301, headers: { location: 'https://www.example.com/' } }));
   assert.equal(res.status, 301);
-  assert.equal(res.headers.get('location'), `/p/${tok}~https~example.com/https/www.example.com/`);
+  assert.equal(res.headers.get('location'), `/p/${tok}~${X('https://example.com').slice(2)}/${X('https://www.example.com')}/`);
 });
 
 test('표는 6시간 단위라 같은 시간대엔 같고, 6~12시간 남는다', async () => {
@@ -139,8 +141,21 @@ test('페이지 안 주소에 붙은 사이트를 Referer 로 보낸다 (격리�
 
 test('페이지에 넣는 스크립트는 문법 오류가 없다', async () => {
   const { clientScript } = await import('../src/proxy.js');
-  const html = clientScript('https://comic.naver.com/웹툰?a=1', '/p/tok~https~comic.naver.com/', 404);
+  const html = clientScript('https://comic.naver.com/웹툰?a=1', `/p/tok~${X('https://comic.naver.com').slice(2)}/`, 404);
   const js = html.replace(/^<script>/, '').replace(/<\/script>$/, '');
   assert.doesNotThrow(() => new Function(js));
-  assert.match(js, /new RegExp\('\^\/p\/\[\^\/\]\+\/\(https\?\)\/\(\.\+\)\$'\)/);
+  assert.match(js, /new RegExp\('\^\/p\/\[\^\/\]\+\/\(\?:\(https\?\)\/\(\[\^\/\]\+\)\|x\/\(\[A-Za-z0-9_-\]\+\)\)\(\/\.\*\)\?\$'\)/);
+});
+
+test('감춘 사이트 주소 읽기 (새 모양·예전 모양 모두, 이상한 값은 거절)', async () => {
+  const { parseProxyUrl } = await import('../src/proxy.js');
+  const n = parseProxyUrl(new URL(`https://me.dev/p/tok~${X('https://comic.naver.com').slice(2)}/${X('https://image-comic.pstatic.net')}/a.jpg?x=1`));
+  assert.equal(n.token, 'tok');
+  assert.equal(n.referer, 'https://comic.naver.com/');
+  assert.equal(n.target.href, 'https://image-comic.pstatic.net/a.jpg?x=1');
+  const old = parseProxyUrl(new URL('https://me.dev/p/tok~https~comic.naver.com/https/a.com/b'));
+  assert.equal(old.referer, 'https://comic.naver.com/');
+  assert.equal(old.target.href, 'https://a.com/b');
+  assert.equal(parseProxyUrl(new URL(`https://me.dev/p/tok/${X('javascript:alert(1)')}/`)), null);
+  assert.equal(parseProxyUrl(new URL(`https://me.dev/p/tok/${X('https://a.com/evil')}/`)), null);
 });

@@ -137,7 +137,9 @@
 
     function proxyPath(url, tok) {
       const u = new URL(url);
-      return `/p/${tok}/${u.protocol.slice(0, -1)}/${u.host}${u.pathname}${u.search}${u.hash}`;
+      // 사이트 주소는 감춰서 넣는다 (방문 기록에 사이트 이름이 그대로 안 보이게, src/proxy.js 와 같은 방식)
+      const code = btoa(u.origin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      return `/p/${tok}/x/${code}${u.pathname}${u.search}${u.hash}`;
     }
 
     // 틀 안에서 안 보이는 사이트는 기억해 두고 다음부터 바로 전체 화면으로 연다
@@ -237,7 +239,9 @@
     $('tabBtn').addEventListener('click', async () => {
       if (!current) return;
       // 새 탭도 탭 모양이 유지되게, 새 탭에서 이 화면을 거쳐 전체 화면으로 연다
-      window.open('/apps/proxy/?full=' + encodeURIComponent(current), '_blank', 'noopener');
+      // 주소는 감춰서 넘긴다 (방문 기록에 사이트 이름이 안 보이게)
+      const code = btoa(unescape(encodeURIComponent(current))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      window.open('/apps/proxy/?full=' + code, '_blank', 'noopener');
     });
     for (const [name, url] of QUICK) {
       const b = document.createElement('button');
@@ -247,7 +251,11 @@
       $('links').append(b);
     }
     // 들어올 때 로그인돼 있는지 미리 확인
-    const fullParam = new URLSearchParams(location.search).get('full');
+    let fullParam = '';
+    try {
+      const code = new URLSearchParams(location.search).get('full') || '';
+      fullParam = code && decodeURIComponent(escape(atob(code.replace(/-/g, '+').replace(/_/g, '/'))));
+    } catch { /* 이상한 값은 무시 */ }
     if (fullParam && /^https?:\/\//i.test(fullParam)) {
       history.replaceState(null, '', location.pathname);
       openFull(fullParam);

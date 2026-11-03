@@ -13,7 +13,7 @@
         var n = window.name || '';
         if (n.indexOf('__px:') !== 0) return;
         var d = JSON.parse(n.slice(5));
-        if (!/^\/p\/[^\/?#]+\/https?\/[^\/?#]+$/.test(d.r)) return;
+        if (!/^\/p\/[^\/?#]+\/(https?\/[^\/?#]+|x\/[A-Za-z0-9_-]+)$/.test(d.r)) return;
         location.replace(d.r + location.pathname + location.search + location.hash);
       } catch (e) { /* 그냥 안내 화면 */ }
     })();

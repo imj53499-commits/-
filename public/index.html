@@ -11,7 +11,7 @@
         var n = window.name || '';
         if (n.indexOf('__px:') !== 0) return;
         var d = JSON.parse(n.slice(5));
-        if (Date.now() - d.t < 10000 && /^\/p\/[^\/?#]+\/https?\/[^\/?#]+$/.test(d.r)) return location.replace(d.r + location.pathname + location.search + location.hash);
+        if (Date.now() - d.t < 10000 && /^\/p\/[^\/?#]+\/(https?\/[^\/?#]+|x\/[A-Za-z0-9_-]+)$/.test(d.r)) return location.replace(d.r + location.pathname + location.search + location.hash);
         window.name = '';
       } catch (e) { /* 무시 */ }
     })();

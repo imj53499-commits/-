@@ -75,17 +75,37 @@ export function isBlockedHost(hostname) {
   return false;
 }
 
-// /p/<표>/https/host/path?q → { token, target: URL }
+// 사이트 주소(https://comic.naver.com)는 base64url 로 감춰서 주소에 넣는다. 방문 기록에 사이트 이름이 그대로 안 보이게.
+const b64e = (s) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+export function decodeOrigin(code) {
+  try {
+    const o = atob(code.replace(/-/g, '+').replace(/_/g, '/'));
+    return /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i.test(o) ? o : '';
+  } catch {
+    return '';
+  }
+}
+
+// /p/<표>/x/<감춘 사이트>/path?q → { token, referer, target: URL }
+// (예전 모양 /p/<표>/https/host/path 도 읽는다)
 export function parseProxyUrl(url) {
-  const m = /^\/p\/([^/]+)\/(https?)\/([^/?#]+)(\/[^?#]*)?$/.exec(url.pathname);
+  const m = /^\/p\/([^/]+)\/(?:(https?)\/([^/?#]+)|x\/([A-Za-z0-9_-]+))(\/[^?#]*)?$/.exec(url.pathname);
   if (!m) return null;
-  // 표 칸에는 '표~https~comic.naver.com' 처럼 이 요청을 부른 페이지의 사이트가 붙어 있을 수 있다 (Referer 용)
-  const [token, refScheme, refHost] = m[1].split('~');
+  const origin = m[4] ? decodeOrigin(m[4]) : `${m[2]}://${m[3]}`;
+  if (!origin) return null;
+  // 표 칸에는 '표~<감춘 사이트>' 처럼 이 요청을 부른 페이지의 사이트가 붙어 있을 수 있다 (Referer 용)
+  const parts = m[1].split('~');
+  const token = parts[0];
   let referer = '';
-  if (/^https?$/.test(refScheme || '') && /^[a-z0-9.-]+(:\d+)?$/i.test(refHost || '')) referer = `${refScheme}://${refHost}/`;
+  if (parts.length === 2) {
+    const o = decodeOrigin(parts[1]);
+    if (o) referer = `${o}/`;
+  } else if (/^https?$/.test(parts[1] || '') && /^[a-z0-9.-]+(:\d+)?$/i.test(parts[2] || '')) {
+    referer = `${parts[1]}://${parts[2]}/`;
+  }
   let target;
   try {
-    target = new URL(`${m[2]}://${m[3]}${m[4] || '/'}${url.search}`);
+    target = new URL(`${origin}${m[5] || '/'}${url.search}`);
   } catch {
     return null;
   }
@@ -104,14 +124,14 @@ export function realReferer(ref, origin) {
 }
 
 export function encodeTarget(u) {
-  return `${u.protocol.slice(0, -1)}/${u.host}${u.pathname}${u.search}${u.hash}`;
+  return `x/${b64e(u.origin)}${u.pathname}${u.search}${u.hash}`;
 }
 
 // 페이지 안의 주소 하나를 프록시 주소로 바꾼다. base 는 원래 사이트 기준 주소.
 export function proxify(raw, base, prefix) {
   const s = String(raw ?? '').trim();
   if (!s || s.startsWith('#') || /^(javascript|data|blob|mailto|tel|about|sms):/i.test(s)) return raw;
-  if (s.startsWith(prefix) || /^\/p\/[^/]+\/https?\//.test(s)) return raw;
+  if (s.startsWith(prefix) || /^\/p\/[^/]+\/(https?|x)\//.test(s)) return raw;
   let u;
   try {
     u = new URL(s, base);
@@ -157,19 +177,22 @@ set:function(v){var parts=String(v).split(';'),kv=parts[0],i=kv.indexOf('=');if(
 var del=parts.some(function(p){p=p.trim().toLowerCase();return p==='max-age=0'||/^max-age=-/.test(p)||(p.indexOf('expires=')===0&&new Date(p.slice(8))<new Date())});
 if(del)delete J[k];else J[k]=val}})}catch(e2){}}
 try{if(window.indexedDB)indexedDB.open('__t').onerror=function(){}}catch(e){try{Object.defineProperty(window,'indexedDB',{value:undefined,configurable:true})}catch(e2){}}
-var PX=new RegExp('^/p/[^/]+/(https?)/(.+)$');
-var TU=new URL(T),TO=TU.origin,ROOT=P+TU.protocol.slice(0,-1)+'/'+TU.host,HR=history.replaceState,HP=history.pushState;
+function E64(s){return btoa(s).split('+').join('-').split('/').join('_').split('=').join('')}
+function D64(s){try{var o=atob(s.split('-').join('+').split('_').join('/'));return /^https?:/.test(o)?o:''}catch(e){return ''}}
+var PX=new RegExp('^/p/[^/]+/(?:(https?)/([^/]+)|x/([A-Za-z0-9_-]+))(/.*)?$');
+function dec(path){var m=PX.exec(path);if(!m)return null;var o=m[3]?D64(m[3]):m[1]+'://'+m[2];return o?o+(m[4]||'/'):null}
+var TU=new URL(T),TO=TU.origin,ROOT=P+'x/'+E64(TO),HR=history.replaceState,HP=history.pushState;
 // 주소창 경로를 원래 사이트 경로(/webtoon 등)로 바꿔 둔다. 화면을 경로로 고르는 앱(React 등)이 제 페이지를 알아보게.
-try{if(PX.test(location.pathname))HR.call(history,history.state,'',TU.pathname+TU.search+location.hash)}catch(e){}
-function base(){var m=PX.exec(location.pathname);return m?m[1]+'://'+m[2]+location.search:TO+location.pathname+location.search}
+try{if(dec(location.pathname))HR.call(history,history.state,'',TU.pathname+TU.search+location.hash)}catch(e){}
+function base(){var d=dec(location.pathname);return d?d+location.search:TO+location.pathname+location.search}
 // 새로고침하거나 앱이 location 으로 다른 경로로 가면 이 사이트의 404 페이지가 window.name 을 보고 프록시로 되돌린다
 // 프록시 화면이 window.name 에 넘겨준 탭 모양(제목·아이콘). 전체 화면일 때 탭에 그 사이트 대신 이걸 보여 준다.
 var D=null;try{if(String(window.name).indexOf('__px:')===0)D=JSON.parse(String(window.name).slice(5)).d||null}catch(e){}
 function mark(){try{window.name='__px:'+JSON.stringify({r:ROOT,t:Date.now(),d:D})}catch(e){}}
 mark();addEventListener('pagehide',mark);
 function px(r){try{var s=String(r);if(!s||/^(#|javascript:|data:|blob:|mailto:|tel:|about:)/i.test(s))return r;
-if(s.indexOf(O+'/p/')===0?PX.test(s.slice(O.length).split('?')[0]):PX.test(s.split('?')[0]))return r;var B=base(),u=new URL(s,B);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,B);
-if(!/^https?:$/.test(u.protocol))return r;return P+u.protocol.slice(0,-1)+'/'+u.host+u.pathname+u.search+u.hash}catch(e){return r}}
+if(dec((s.indexOf(O+'/p/')===0?s.slice(O.length):s).split('?')[0]))return r;var B=base(),u=new URL(s,B);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,B);
+if(!/^https?:$/.test(u.protocol))return r;return P+'x/'+E64(u.origin)+u.pathname+u.search+u.hash}catch(e){return r}}
 window.__px=px;
 var f=window.fetch;if(f)window.fetch=function(i,o){try{if(typeof i==='string'||i instanceof URL)i=px(String(i));else if(i&&i.url)i=new Request(px(i.url),i)}catch(e){}
 var w=typeof i==='string'?i:(i&&i.url)||'';return f.call(this,i,o).then(function(r){if(r.status>=400)note('요청 실패 '+r.status+': '+w);return r},function(e){note('요청 실패: '+w);throw e})};
@@ -185,7 +208,7 @@ hook(window.HTMLSourceElement,'src');hook(window.HTMLMediaElement,'src');hook(wi
 hook(window.HTMLEmbedElement,'src');hook(window.HTMLVideoElement,'poster');
 var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){var l=String(n).toLowerCase();
 if(l==='src'||l==='action'||l==='poster'||l==='formaction'||(l==='href'&&!(this instanceof SVGElement)))v=px(v);return sa.call(this,n,v)};
-function local(u){try{var s=String(u),x=new URL(s,base());if(x.origin===O){var m=PX.exec(x.pathname);if(!m)return s;x=new URL(m[1]+'://'+m[2]+x.search+x.hash)}
+function local(u){try{var s=String(u),x=new URL(s,base());if(x.origin===O){var d=dec(x.pathname);if(!d)return s;x=new URL(d+x.search+x.hash)}
 return x.origin===TO?x.pathname+x.search+x.hash:s}catch(e){return u}}
 [['pushState',HP],['replaceState',HR]].forEach(function(a){history[a[0]]=function(st,t,u){if(u!=null)arguments[2]=local(u);var r=a[1].apply(this,arguments);tell();return r}});
 var A=['src','href','action','poster','data'];
@@ -343,7 +366,7 @@ export async function handleProxy(request, env, fetchFn = fetch) {
 
   // 이 페이지 안의 주소에는 이 페이지의 사이트를 붙여 둔다. 그 주소로 요청이 오면 Referer 로 쓴다.
   // (격리된 페이지에서는 브라우저가 Referer 를 안 보내서, 그림 도용 막기를 하는 사이트의 그림이 안 나옴)
-  const prefix = `${PREFIX}${parsed.token}~${target.protocol.slice(0, -1)}~${target.host}/`;
+  const prefix = `${PREFIX}${parsed.token}~${b64e(target.origin)}/`;
   const headers = new Headers();
   for (const h of PASS_REQUEST_HEADERS) {
     const v = request.headers.get(h);
