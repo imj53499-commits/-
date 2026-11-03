@@ -169,6 +169,36 @@ const APPS = [
   { id: 'youtube', name: 'School YouTube', href: '#/youtube', color: 'linear-gradient(135deg, #34d399, #10b981 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z"/></svg>' }
 ];
 
+// 관리자가 나에게 안 보이게 한 앱 (서버에서도 막는다)
+let hiddenApps = new Set();
+
+async function loadHiddenApps() {
+  if (!me || me.role === 'admin') {
+    hiddenApps = new Set();
+    return;
+  }
+  try {
+    hiddenApps = new Set((await api('/api/apps')).hidden);
+  } catch {}
+}
+
+// 앱 목록을 그린 뒤 설정이 바뀌었으면 다시 그린다
+async function refreshHiddenApps(token) {
+  const before = [...hiddenApps].sort().join();
+  await loadHiddenApps();
+  if (token === renderToken && [...hiddenApps].sort().join() !== before) route();
+}
+
+function renderAppHidden() {
+  setTitle();
+  setActiveNav('');
+  document.body.classList.add('app-mode');
+  appTitle.textContent = '';
+  app.replaceChildren(el('div', { class: 'message' },
+    el('div', { text: '이 앱은 쓸 수 없어요. 관리자에게 문의해 주세요.' }),
+    el('a', { class: 'auth-link', href: '#/', text: '앱 목록으로' })));
+}
+
 function renderLauncher() {
   setTitle();
   setActiveNav('');
@@ -182,7 +212,7 @@ function renderLauncher() {
   app.replaceChildren(el('div', { class: 'launcher' },
     el('h1', { class: 'launcher-title', text: name ? `${name}님, 무엇을 할까요?` : '무엇을 할까요?' }),
     el('div', { class: 'app-grid' },
-      ...APPS.filter((a) => !a.off).map(tile),
+      ...APPS.filter((a) => !a.off && !hiddenApps.has(a.id)).map(tile),
       el('div', { class: 'app-tile soon', 'aria-hidden': 'true' },
         el('span', { class: 'app-icon' }, '+'),
         el('span', { class: 'app-name', text: '곧 추가돼요' })))));
@@ -754,6 +784,8 @@ function route() {
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
 
   // 유튜브를 처음 쓸 때는 이동 단축키부터 정해야 한다 (키보드가 없는 휴대폰은 빼고)
+  // 관리자가 유튜브 앱을 안 보이게 했으면
+  if (parts.length && hiddenApps.has('youtube')) return renderAppHidden();
   if (parts[0] === 'jump-setup') return renderJumpSetup(token, '#/youtube');
   if (parts.length && needsJumpSetup()) return renderJumpSetup(token, location.hash);
 
@@ -764,7 +796,11 @@ function route() {
     const q = new URLSearchParams(query).get('q') || '';
     if (q.trim()) return renderSearch(q.trim(), token);
   }
-  if (!parts.length) return renderLauncher();
+  if (!parts.length) {
+    renderLauncher();
+    refreshHiddenApps(token);
+    return;
+  }
   searchInput.value = '';
   const category = parts[0] === 'c' && CATEGORY_LABELS[parts[1]] ? parts[1] : 'all';
   return renderHome(category, token);
@@ -918,6 +954,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
         return;
       }
       me = await api('/api/auth/login', { method: 'POST', body });
+      await loadHiddenApps();
       route();
     } catch (err) {
       if (err.code === 'BLOCKED') return route();
@@ -1170,6 +1207,7 @@ async function renderAdmin(token) {
       submit.disabled = true;
       try {
         me = await api('/api/admin/login', { method: 'POST', body: { password: password.value } });
+        hiddenApps = new Set();
         blockedNotice = ''; // 관리자가 로그인하면 이 기기의 차단도 풀린다
         route();
       } catch (err) {
@@ -1191,8 +1229,9 @@ async function renderAdmin(token) {
 
   let users;
   let messages;
+  let access;
   try {
-    [users, messages] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages')]);
+    [users, messages, access] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages'), api('/api/admin/apps')]);
   } catch (err) {
     if (token !== renderToken) return;
     if (err.code === 'ADMIN_REQUIRED') { me = null; return route(); }
@@ -1337,7 +1376,50 @@ async function renderAdmin(token) {
           ? el('ul', { class: 'admin-list' }, ...list.map(userRow))
           : el('p', { class: 'admin-empty', text: status === 'pending' ? '기다리는 사람이 없어요.' : '없음' }));
     });
-    body.replaceChildren(inbox, ...sections);
+    body.replaceChildren(inbox, appAccessSection(), ...sections);
+  }
+
+  // 앱 보이기: 앱마다 모두 / 선택한 사람만 / 아무도 안 보임 (관리자는 언제나 다 보임)
+  // 프록시 앱은 이 설정에 넣지 않는다.
+  function appAccessSection() {
+    const approved = users.filter((u) => u.status === 'approved');
+    const rows = APPS.filter((a) => !a.off && a.id !== 'proxy').map((a) => {
+      const rule = access[a.id] || { mode: 'all', users: [] };
+      const mode = el('select', { 'aria-label': `${a.name} 보이기` },
+        ...[['all', '모두에게 보이기'], ['some', '선택한 사람만'], ['none', '아무에게도 안 보이기']].map(([value, text]) => {
+          const o = el('option', { value, text });
+          if (rule.mode === value) o.selected = true;
+          return o;
+        }));
+      const picks = el('div', { class: 'app-access-users' }, ...(approved.length ? approved.map((u) => {
+        const box = el('input', { type: 'checkbox', value: u.username.toLowerCase() });
+        box.checked = rule.users.includes(u.username.toLowerCase());
+        return el('label', {}, box, el('span', { text: `${u.name || u.username} (${u.username})` }));
+      }) : [el('span', { class: 'admin-empty', text: '승인된 사람이 없어요.' })]));
+      const status = el('span', { class: 'app-access-status', role: 'status' });
+      const showPicks = () => { picks.hidden = mode.value !== 'some'; };
+      mode.addEventListener('change', showPicks);
+      showPicks();
+      const save = el('button', { type: 'button', class: 'approve', text: '저장', onclick: async () => {
+        save.disabled = true;
+        status.textContent = '';
+        try {
+          const chosen = [...picks.querySelectorAll('input:checked')].map((b) => b.value);
+          access = (await api('/api/admin/apps', { method: 'POST', body: { id: a.id, mode: mode.value, users: chosen } })).access;
+          status.textContent = '저장했어요';
+        } catch (err) {
+          status.textContent = err.message;
+        }
+        save.disabled = false;
+      } });
+      return el('li', { class: 'app-access' },
+        el('div', { class: 'app-access-head' }, el('strong', { text: a.name }), mode, save, status),
+        picks);
+    });
+    return el('section', { class: 'admin-section' },
+      el('h2', { text: '앱 보이기' }),
+      el('p', { class: 'admin-empty', text: '앱마다 볼 수 있는 사람을 정해요. 관리자는 언제나 모든 앱이 보여요.' }),
+      el('ul', { class: 'admin-list' }, ...rows));
   }
   draw();
 }
@@ -1377,6 +1459,7 @@ document.getElementById('adminLink').addEventListener('click', () => settingsDia
 async function loadMe() {
   try {
     me = await api('/api/auth/me');
+    await loadHiddenApps();
   } catch (err) {
     // 로그인이 안 돼 있으면(로그인 기능을 설정하지 않은 사이트 포함) 로그인 화면만 보여 준다.
     me = null;

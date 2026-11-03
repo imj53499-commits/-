@@ -653,3 +653,15 @@ body.app-mode .content, body.app-mode.sidebar-collapsed .content { padding-left:
 .jump-setup input:focus { outline: none; border-color: var(--accent); }
 .jump-key { height: 52px; border-radius: 14px; border: 1.5px dashed var(--border); background: var(--bg-soft); color: inherit; font: 700 17px ui-monospace, monospace; cursor: pointer; }
 .jump-key.recording { border-color: var(--accent); color: var(--accent); }
+
+/* 관리자: 앱 보이기 */
+.app-access { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
+.app-access + .app-access { border-top: 1px solid var(--border); }
+.app-access-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.app-access-head strong { flex: 1; min-width: 120px; }
+.app-access-head select { height: 34px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: inherit; }
+.app-access-head button { padding: 7px 14px; border-radius: 16px; background: var(--bg-soft); font-weight: 600; font-size: 13px; }
+.app-access-status { font-size: 12px; color: var(--text-sub); }
+.app-access-users { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+.app-access-users[hidden] { display: none; }
+.app-access-users label { display: flex; align-items: center; gap: 6px; }
