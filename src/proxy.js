@@ -79,13 +79,28 @@ export function isBlockedHost(hostname) {
 export function parseProxyUrl(url) {
   const m = /^\/p\/([^/]+)\/(https?)\/([^/?#]+)(\/[^?#]*)?$/.exec(url.pathname);
   if (!m) return null;
+  // 표 칸에는 '표~https~comic.naver.com' 처럼 이 요청을 부른 페이지의 사이트가 붙어 있을 수 있다 (Referer 용)
+  const [token, refScheme, refHost] = m[1].split('~');
+  let referer = '';
+  if (/^https?$/.test(refScheme || '') && /^[a-z0-9.-]+(:\d+)?$/i.test(refHost || '')) referer = `${refScheme}://${refHost}/`;
   let target;
   try {
     target = new URL(`${m[2]}://${m[3]}${m[4] || '/'}${url.search}`);
   } catch {
     return null;
   }
-  return { token: m[1], target };
+  return { token, referer, target };
+}
+
+// 우리 프록시 주소로 된 Referer → 원래 사이트 주소. 프록시 주소가 아니면 ''.
+export function realReferer(ref, origin) {
+  if (!ref || !ref.startsWith(origin + PREFIX)) return '';
+  try {
+    const parsed = parseProxyUrl(new URL(ref));
+    return parsed ? parsed.target.href : '';
+  } catch {
+    return '';
+  }
 }
 
 export function encodeTarget(u) {
@@ -96,7 +111,7 @@ export function encodeTarget(u) {
 export function proxify(raw, base, prefix) {
   const s = String(raw ?? '').trim();
   if (!s || s.startsWith('#') || /^(javascript|data|blob|mailto|tel|about|sms):/i.test(s)) return raw;
-  if (s.startsWith(prefix)) return raw;
+  if (s.startsWith(prefix) || /^\/p\/[^/]+\/https?\//.test(s)) return raw;
   let u;
   try {
     u = new URL(s, base);
@@ -125,7 +140,7 @@ export function rewriteCss(css, base, prefix) {
 // ---------- 페이지에 넣는 스크립트 ----------
 // fetch / XHR / window.open / 나중에 생기는 링크·그림 주소를 바꾸고, 바깥 화면(주소창)에 지금 주소를 알려 준다.
 
-function clientScript(target, prefix, code = 200) {
+export function clientScript(target, prefix, code = 200) {
   // 원래 페이지의 글자 인코딩(EUC-KR 등)과 상관없이 안 깨지게, 한글 같은 글자는 \uXXXX 로 바꿔 넣는다
   return clientScriptRaw(target, prefix, code).replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
@@ -142,10 +157,10 @@ set:function(v){var parts=String(v).split(';'),kv=parts[0],i=kv.indexOf('=');if(
 var del=parts.some(function(p){p=p.trim().toLowerCase();return p==='max-age=0'||/^max-age=-/.test(p)||(p.indexOf('expires=')===0&&new Date(p.slice(8))<new Date())});
 if(del)delete J[k];else J[k]=val}})}catch(e2){}}
 try{if(window.indexedDB)indexedDB.open('__t').onerror=function(){}}catch(e){try{Object.defineProperty(window,'indexedDB',{value:undefined,configurable:true})}catch(e2){}}
-function base(){var p=location.pathname;if(p.indexOf(P)!==0)return T;var r=p.slice(P.length),i=r.indexOf('/');
-return i<0?T:r.slice(0,i)+'://'+r.slice(i+1)+location.search}
+var PX=new RegExp('^/p/[^/]+/(https?)/(.+)$');
+function base(){var m=PX.exec(location.pathname);return m?m[1]+'://'+m[2]+location.search:T}
 function px(r){try{var s=String(r);if(!s||/^(#|javascript:|data:|blob:|mailto:|tel:|about:)/i.test(s))return r;
-if(s.indexOf(O+P)===0||s.indexOf(P)===0)return r;var B=base(),u=new URL(s,B);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,B);
+if(s.indexOf(O+'/p/')===0?PX.test(s.slice(O.length).split('?')[0]):PX.test(s.split('?')[0]))return r;var B=base(),u=new URL(s,B);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,B);
 if(!/^https?:$/.test(u.protocol))return r;return P+u.protocol.slice(0,-1)+'/'+u.host+u.pathname+u.search+u.hash}catch(e){return r}}
 window.__px=px;
 var f=window.fetch;if(f)window.fetch=function(i,o){try{if(typeof i==='string'||i instanceof URL)i=px(String(i));else if(i&&i.url)i=new Request(px(i.url),i)}catch(e){}return f.call(this,i,o)};
@@ -300,14 +315,17 @@ export async function handleProxy(request, env, fetchFn = fetch) {
   const { target } = parsed;
   if (isBlockedHost(target.hostname) || target.host === url.host) return notice('이 주소는 열 수 없어요.', 403);
 
-  const prefix = `${PREFIX}${parsed.token}/`;
+  // 이 페이지 안의 주소에는 이 페이지의 사이트를 붙여 둔다. 그 주소로 요청이 오면 Referer 로 쓴다.
+  // (격리된 페이지에서는 브라우저가 Referer 를 안 보내서, 그림 도용 막기를 하는 사이트의 그림이 안 나옴)
+  const prefix = `${PREFIX}${parsed.token}~${target.protocol.slice(0, -1)}~${target.host}/`;
   const headers = new Headers();
   for (const h of PASS_REQUEST_HEADERS) {
     const v = request.headers.get(h);
     if (v) headers.set(h, v);
   }
   if (!headers.has('user-agent')) headers.set('user-agent', 'Mozilla/5.0');
-  headers.set('referer', target.origin + '/');
+  // 그림 도용 막기(Referer 검사)를 하는 사이트(네이버웹툰 등)를 위해, 이 요청을 보낸 페이지의 원래 주소를 Referer 로 보낸다
+  headers.set('referer', parsed.referer || realReferer(request.headers.get('referer'), url.origin) || target.origin + '/');
   if (!['GET', 'HEAD'].includes(request.method)) headers.set('origin', target.origin);
 
   // 그림·CSS·JS 같은 요청은 Cloudflare 캐시에 오래 둔다 (이 사이트 쿠키를 안 보내니 누구에게나 같은 내용)

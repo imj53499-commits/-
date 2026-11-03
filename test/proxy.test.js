@@ -67,7 +67,7 @@ test('handleProxy: 표가 없으면 막고, 쿠키는 안 보내고, 응답에 s
   assert.equal(res.headers.get('set-cookie'), null);
   assert.equal(res.headers.get('x-frame-options'), null);
   assert.match(res.headers.get('content-security-policy'), /^sandbox /);
-  assert.equal(await res.text(), `body{background:url(/p/${tok}/https/example.com/bg.png)}`);
+  assert.equal(await res.text(), `body{background:url(/p/${tok}~https~example.com/https/example.com/bg.png)}`);
 
   const local = await handleProxy(new Request(`https://me.dev/p/${tok}/http/127.0.0.1/`), env, fake);
   assert.equal(local.status, 403);
@@ -79,7 +79,7 @@ test('handleProxy: 다른 곳으로 보내기(redirect) 주소도 바꾼다', as
   const res = await handleProxy(new Request(`https://me.dev/p/${tok}/https/example.com/`), env,
     async () => new Response(null, { status: 301, headers: { location: 'https://www.example.com/' } }));
   assert.equal(res.status, 301);
-  assert.equal(res.headers.get('location'), `/p/${tok}/https/www.example.com/`);
+  assert.equal(res.headers.get('location'), `/p/${tok}~https~example.com/https/www.example.com/`);
 });
 
 test('표는 6시간 단위라 같은 시간대엔 같고, 6~12시간 남는다', async () => {
@@ -104,4 +104,43 @@ test('그림은 캐시 시간을 붙이고, 페이지(HTML 아님)·API 응답�
     async (u, i) => { init = i; return new Response('{}', { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }); });
   assert.equal(apiRes.headers.get('cache-control'), 'no-store');
   assert.equal(init.cf, undefined);
+});
+
+test('Referer: 프록시 페이지 주소를 원래 사이트 주소로 바꿔서 보낸다 (네이버웹툰 그림 등)', async () => {
+  const { realReferer } = await import('../src/proxy.js');
+  assert.equal(realReferer('https://me.dev/p/tok/https/comic.naver.com/webtoon/detail?titleId=1', 'https://me.dev'),
+    'https://comic.naver.com/webtoon/detail?titleId=1');
+  assert.equal(realReferer('https://evil.dev/p/tok/https/a.com/', 'https://me.dev'), '');
+  assert.equal(realReferer(null, 'https://me.dev'), '');
+
+  const env = { DB: {}, ADMIN_PASSWORD: 'pw' };
+  const tok = await makeToken('pw', Date.now() + 60000);
+  let sent;
+  await handleProxy(new Request(`https://me.dev/p/${tok}/https/image-comic.pstatic.net/a.jpg`, {
+    headers: { referer: `https://me.dev/p/${tok}/https/comic.naver.com/webtoon/detail?titleId=1` }
+  }), env, async (u, i) => { sent = i.headers.get('referer'); return new Response('x', { headers: { 'content-type': 'image/jpeg' } }); });
+  assert.equal(sent, 'https://comic.naver.com/webtoon/detail?titleId=1');
+});
+
+test('페이지 안 주소에 붙은 사이트를 Referer 로 보낸다 (격리된 페이지는 브라우저가 Referer 를 안 보냄)', async () => {
+  const env = { DB: {}, ADMIN_PASSWORD: 'pw' };
+  const tok = await makeToken('pw', Date.now() + 60000);
+  let sent;
+  const fake = async (u, i) => { sent = i.headers.get('referer'); return new Response('x', { headers: { 'content-type': 'image/jpeg' } }); };
+  const ok = await handleProxy(new Request(`https://me.dev/p/${tok}~https~comic.naver.com/https/image-comic.pstatic.net/a.jpg`), env, fake);
+  assert.equal(ok.status, 200);
+  assert.equal(sent, 'https://comic.naver.com/');
+  // 이상한 값은 무시하고 원래 사이트 주소를 쓴다
+  await handleProxy(new Request(`https://me.dev/p/${tok}~ftp~x y/https/image-comic.pstatic.net/a.jpg`), env, fake);
+  assert.equal(sent, 'https://image-comic.pstatic.net/');
+  // 표가 틀리면 사이트가 붙어 있어도 막힌다
+  assert.equal((await handleProxy(new Request('https://me.dev/p/bad~https~a.com/https/b.com/'), env, fake)).status, 403);
+});
+
+test('페이지에 넣는 스크립트는 문법 오류가 없다', async () => {
+  const { clientScript } = await import('../src/proxy.js');
+  const html = clientScript('https://comic.naver.com/웹툰?a=1', '/p/tok~https~comic.naver.com/', 404);
+  const js = html.replace(/^<script>/, '').replace(/<\/script>$/, '');
+  assert.doesNotThrow(() => new Function(js));
+  assert.match(js, /new RegExp\('\^\/p\/\[\^\/\]\+\/\(https\?\)\/\(\.\+\)\$'\)/);
 });
