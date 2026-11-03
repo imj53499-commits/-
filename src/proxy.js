@@ -128,6 +128,15 @@ export function rewriteCss(css, base, prefix) {
 function clientScript(target, prefix) {
   return `<script>(function(){
 var T=${JSON.stringify(target)},P=${JSON.stringify(prefix)},O=location.origin;
+function MS(){var d=Object.create(null);return{getItem:function(k){k=String(k);return k in d?d[k]:null},setItem:function(k,v){d[String(k)]=String(v)},
+removeItem:function(k){delete d[String(k)]},clear:function(){d=Object.create(null)},key:function(i){var a=Object.keys(d);return i<a.length?a[i]:null},get length(){return Object.keys(d).length}}}
+['localStorage','sessionStorage'].forEach(function(n){try{window[n].length}catch(e){try{Object.defineProperty(window,n,{value:MS(),configurable:true})}catch(e2){}}});
+try{document.cookie}catch(e){var J={};try{Object.defineProperty(document,'cookie',{configurable:true,
+get:function(){return Object.keys(J).map(function(k){return k+'='+J[k]}).join('; ')},
+set:function(v){var parts=String(v).split(';'),kv=parts[0],i=kv.indexOf('=');if(i<0)return;var k=kv.slice(0,i).trim(),val=kv.slice(i+1).trim();
+var del=parts.some(function(p){p=p.trim().toLowerCase();return p==='max-age=0'||/^max-age=-/.test(p)||(p.indexOf('expires=')===0&&new Date(p.slice(8))<new Date())});
+if(del)delete J[k];else J[k]=val}})}catch(e2){}}
+try{if(window.indexedDB)indexedDB.open('__t').onerror=function(){}}catch(e){try{Object.defineProperty(window,'indexedDB',{value:undefined,configurable:true})}catch(e2){}}
 function px(r){try{var s=String(r);if(!s||/^(#|javascript:|data:|blob:|mailto:|tel:|about:)/i.test(s))return r;
 if(s.indexOf(O+P)===0||s.indexOf(P)===0)return r;var u=new URL(s,T);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,T);
 if(!/^https?:$/.test(u.protocol))return r;return P+u.protocol.slice(0,-1)+'/'+u.host+u.pathname+u.search+u.hash}catch(e){return r}}
@@ -246,7 +255,8 @@ export async function handleProxy(request, env, fetchFn = fetch) {
     return new Response(null, {
       status: 204,
       headers: {
-        'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, HEAD',
+        'Access-Control-Allow-Origin': request.headers.get('Origin') || '*', 'Access-Control-Allow-Credentials': 'true', Vary: 'Origin',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, HEAD',
         'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') || '*', 'Access-Control-Max-Age': '600'
       }
     });
@@ -292,7 +302,12 @@ export async function handleProxy(request, env, fetchFn = fetch) {
   const out = new Headers(upstream.headers);
   for (const h of DROP_RESPONSE_HEADERS) out.delete(h);
   out.set('Content-Security-Policy', SANDBOX_CSP);
-  out.set('Access-Control-Allow-Origin', '*');
+  // 격리된 페이지의 출처는 "null" 이다. 로그인 정보를 담은 요청(credentials: include)도 통과하도록 출처를 그대로 돌려준다.
+  // (이 사이트 쿠키는 어차피 원래 사이트로 안 보내니 안전하다)
+  out.set('Access-Control-Allow-Origin', request.headers.get('Origin') || '*');
+  if (request.headers.get('Origin')) out.set('Access-Control-Allow-Credentials', 'true');
+  out.append('Vary', 'Origin');
+  out.set('Access-Control-Expose-Headers', '*');
   out.set('X-Content-Type-Options', 'nosniff');
   out.set('X-Robots-Tag', 'noindex, nofollow');
   out.set('Referrer-Policy', 'no-referrer');
