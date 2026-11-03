@@ -125,7 +125,12 @@ export function rewriteCss(css, base, prefix) {
 // ---------- 페이지에 넣는 스크립트 ----------
 // fetch / XHR / window.open / 나중에 생기는 링크·그림 주소를 바꾸고, 바깥 화면(주소창)에 지금 주소를 알려 준다.
 
-function clientScript(target, prefix) {
+function clientScript(target, prefix, code = 200) {
+  // 원래 페이지의 글자 인코딩(EUC-KR 등)과 상관없이 안 깨지게, 한글 같은 글자는 \uXXXX 로 바꿔 넣는다
+  return clientScriptRaw(target, prefix, code).replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+function clientScriptRaw(target, prefix, code) {
   return `<script>(function(){
 var T=${JSON.stringify(target)},P=${JSON.stringify(prefix)},O=location.origin;
 function MS(){var d=Object.create(null);return{getItem:function(k){k=String(k);return k in d?d[k]:null},setItem:function(k,v){d[String(k)]=String(v)},
@@ -137,8 +142,10 @@ set:function(v){var parts=String(v).split(';'),kv=parts[0],i=kv.indexOf('=');if(
 var del=parts.some(function(p){p=p.trim().toLowerCase();return p==='max-age=0'||/^max-age=-/.test(p)||(p.indexOf('expires=')===0&&new Date(p.slice(8))<new Date())});
 if(del)delete J[k];else J[k]=val}})}catch(e2){}}
 try{if(window.indexedDB)indexedDB.open('__t').onerror=function(){}}catch(e){try{Object.defineProperty(window,'indexedDB',{value:undefined,configurable:true})}catch(e2){}}
+function base(){var p=location.pathname;if(p.indexOf(P)!==0)return T;var r=p.slice(P.length),i=r.indexOf('/');
+return i<0?T:r.slice(0,i)+'://'+r.slice(i+1)+location.search}
 function px(r){try{var s=String(r);if(!s||/^(#|javascript:|data:|blob:|mailto:|tel:|about:)/i.test(s))return r;
-if(s.indexOf(O+P)===0||s.indexOf(P)===0)return r;var u=new URL(s,T);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,T);
+if(s.indexOf(O+P)===0||s.indexOf(P)===0)return r;var B=base(),u=new URL(s,B);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,B);
 if(!/^https?:$/.test(u.protocol))return r;return P+u.protocol.slice(0,-1)+'/'+u.host+u.pathname+u.search+u.hash}catch(e){return r}}
 window.__px=px;
 var f=window.fetch;if(f)window.fetch=function(i,o){try{if(typeof i==='string'||i instanceof URL)i=px(String(i));else if(i&&i.url)i=new Request(px(i.url),i)}catch(e){}return f.call(this,i,o)};
@@ -146,14 +153,28 @@ var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u)
 var wo=window.open;window.open=function(u){if(u)arguments[0]=px(u);return wo.apply(this,arguments)};
 if(navigator.sendBeacon){var sb=navigator.sendBeacon.bind(navigator);navigator.sendBeacon=function(u,d){return sb(px(u),d)}}
 try{navigator.serviceWorker&&Object.defineProperty(navigator,'serviceWorker',{get:function(){return undefined}})}catch(e){}
+function hook(C,prop){try{var d=C&&Object.getOwnPropertyDescriptor(C.prototype,prop);if(!d||!d.set)return;
+Object.defineProperty(C.prototype,prop,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){d.set.call(this,px(v))}})}catch(e){}}
+hook(window.HTMLScriptElement,'src');hook(window.HTMLLinkElement,'href');hook(window.HTMLImageElement,'src');hook(window.HTMLIFrameElement,'src');
+hook(window.HTMLSourceElement,'src');hook(window.HTMLMediaElement,'src');hook(window.HTMLAnchorElement,'href');hook(window.HTMLFormElement,'action');
+hook(window.HTMLEmbedElement,'src');hook(window.HTMLVideoElement,'poster');
+var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){var l=String(n).toLowerCase();
+if(l==='src'||l==='action'||l==='poster'||l==='formaction'||(l==='href'&&!(this instanceof SVGElement)))v=px(v);return sa.call(this,n,v)};
+['pushState','replaceState'].forEach(function(n){var o=history[n];history[n]=function(st,t,u){if(u!=null)arguments[2]=px(u);var r=o.apply(this,arguments);tell();return r}});
 var A=['src','href','action','poster','data'];
 function fix(el){if(!el||el.nodeType!==1)return;for(var i=0;i<A.length;i++){var a=A[i];if(el.hasAttribute&&el.hasAttribute(a)){var v=el.getAttribute(a),n=px(v);if(n!==v)el.setAttribute(a,n)}}
 if(el.hasAttribute&&el.hasAttribute('integrity'))el.removeAttribute('integrity')}
 new MutationObserver(function(ms){ms.forEach(function(m){if(m.type==='attributes')fix(m.target);else m.addedNodes.forEach(function(n){fix(n);n.querySelectorAll&&n.querySelectorAll('[src],[href],[action],[poster]').forEach(fix)})})})
 .observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:A});
-document.addEventListener('submit',function(e){var fm=e.target;if(fm&&fm.getAttribute){var a=fm.getAttribute('action');if(a==null||a==='')fm.setAttribute('action',px(T));}},true);
-function tell(){try{var p=location.pathname.split('/');var real=p[3]+'://'+p.slice(4).join('/')+location.search;parent!==window&&parent.postMessage({type:'proxy-page',url:decodeURI(real),title:document.title},'*')}catch(e){}}
+document.addEventListener('submit',function(e){var fm=e.target;if(fm&&fm.getAttribute){var a=fm.getAttribute('action');if(a==null||a==='')fm.setAttribute('action',px(base()));}},true);
+function tell(){try{parent!==window&&parent.postMessage({type:'proxy-page',url:decodeURI(base()),title:document.title},'*')}catch(e){}}
 tell();addEventListener('load',tell);addEventListener('popstate',tell);
+var E=[];if(${Number(code)}>=400)E.push('원래 사이트가 거절함: HTTP ${Number(code)}');function note(m){m=String(m).replace(P,'/p/…/');if(E.length<15&&E.indexOf(m)<0)E.push(m.slice(0,300))}
+addEventListener('error',function(e){var t=e.target;if(t&&t!==window&&t.nodeType===1)note('불러오기 실패: <'+t.tagName.toLowerCase()+'> '+(t.src||t.href||''));else note('오류: '+(e.message||e))},true);
+addEventListener('unhandledrejection',function(e){var r=e.reason;note('오류: '+(r&&(r.stack||r.message)||r))});
+function status(){try{var b=document.body,empty=!b||(b.innerText.trim()===''&&!b.querySelector('img,video,canvas,svg,iframe,input,button'));
+parent!==window&&parent.postMessage({type:'proxy-status',empty:empty,errors:E},'*')}catch(e){}}
+setTimeout(status,8000);setTimeout(status,20000);
 })();</script>`;
 }
 
@@ -167,8 +188,9 @@ const ATTRS = [
 ];
 
 function rewriteHtml(res, target, prefix) {
+  const code = res.status;
   const state = { base: target.href, injected: false };
-  const script = clientScript(target.href, prefix);
+  const script = clientScript(target.href, prefix, code);
   let rw = new HTMLRewriter()
     .on('base[href]', {
       element(el) {

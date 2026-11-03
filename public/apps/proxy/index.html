@@ -38,6 +38,12 @@
     .links button:hover { background: var(--bg-hover); }
     .msg { color: var(--text-sub); }
     .msg a { color: var(--accent); }
+    .stuck { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); max-height: calc(100% - 48px); overflow: auto;
+      padding: 18px 20px; border-radius: 14px; background: var(--bg); color: var(--text); border: 1px solid var(--border); box-shadow: 0 8px 30px rgba(0,0,0,.18); z-index: 2; }
+    .stuck h2 { margin: 0 0 6px; font-size: 17px; }
+    .stuck p { margin: 0 0 10px; color: var(--text-sub); font-size: 14px; line-height: 1.5; }
+    .stuck ul { margin: 0 0 12px; padding-left: 18px; font-size: 12px; color: var(--text-sub); word-break: break-all; font-family: ui-monospace, monospace; }
+    .stuck button { padding: 8px 14px; border-radius: 18px; border: 1px solid var(--border); background: var(--bg-soft); color: inherit; cursor: pointer; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -66,6 +72,12 @@
       <form class="big" id="bigForm"><input id="bigInput" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="예: ko.wikipedia.org 또는 검색어" autofocus></form>
       <div class="links" id="links"></div>
       <p class="msg" id="msg" hidden></p>
+    </div>
+    <div class="stuck" id="stuck" hidden>
+      <h2>화면이 안 나왔어요</h2>
+      <p>이 사이트는 프록시로 잘 안 열리는 것 같아요. 아래 내용을 캡처해서 보내 주면 고칠 수 있는지 볼게요.</p>
+      <ul id="stuckList"></ul>
+      <button type="button" id="stuckClose">닫기</button>
     </div>
     <iframe id="view" hidden title="프록시 화면"
       sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock"
@@ -143,6 +155,7 @@
       msg.hidden = true;
       start.hidden = true;
       view.hidden = false;
+      $('stuck').hidden = true;
       view.src = proxyPath(url, tok);
     }
 
@@ -156,6 +169,19 @@
         if (current) go(current);
         return;
       }
+      if (e.data?.type === 'proxy-status') {
+        const list = Array.isArray(e.data.errors) ? e.data.errors : [];
+        $('stuckList').replaceChildren(...(list.length ? list : ['(오류 기록 없음: 페이지가 아무것도 안 그렸어요)']).map((t) => {
+          const li = document.createElement('li');
+          li.textContent = String(t);
+          return li;
+        }));
+        const li = document.createElement('li');
+        li.textContent = '주소: ' + current;
+        $('stuckList').append(li);
+        $('stuck').hidden = !e.data.empty;
+        return;
+      }
       if (e.data?.type !== 'proxy-page') return;
       current = String(e.data.url || '');
       if (document.activeElement !== addr) addr.value = current;
@@ -164,7 +190,9 @@
     $('addrForm').addEventListener('submit', (e) => { e.preventDefault(); addr.blur(); go(addr.value); });
     $('bigForm').addEventListener('submit', (e) => { e.preventDefault(); go($('bigInput').value); });
     $('reloadBtn').addEventListener('click', () => { if (current) go(current); });
+    $('stuckClose').addEventListener('click', () => { $('stuck').hidden = true; });
     $('homeBtn').addEventListener('click', () => {
+      $('stuck').hidden = true;
       view.hidden = true; view.removeAttribute('src'); start.hidden = false; addr.value = ''; current = '';
       $('bigInput').focus();
     });
