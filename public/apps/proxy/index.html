@@ -45,6 +45,7 @@
     .stuck h2 { margin: 0 0 6px; font-size: 17px; }
     .stuck p { margin: 0 0 10px; color: var(--text-sub); font-size: 14px; line-height: 1.5; }
     .stuck ul { margin: 0 0 12px; padding-left: 18px; font-size: 12px; color: var(--text-sub); word-break: break-all; font-family: ui-monospace, monospace; }
+    .stuck button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
     .stuck button { padding: 8px 14px; border-radius: 18px; border: 1px solid var(--border); background: var(--bg-soft); color: inherit; cursor: pointer; }
     [hidden] { display: none !important; }
   </style>
@@ -77,8 +78,9 @@
     </div>
     <div class="stuck" id="stuck" hidden>
       <h2>화면이 안 나왔어요</h2>
-      <p>이 사이트는 프록시로 잘 안 열리는 것 같아요. 아래 내용을 캡처해서 보내 주면 고칠 수 있는지 볼게요.</p>
+      <p>인스타그램처럼 <b>다른 사이트 안에 들어가 있으면 일부러 안 보이는</b> 사이트가 있어요. '전체 화면으로 열기'를 눌러 보세요. 그래도 안 되면 아래 내용을 캡처해서 보내 주세요.</p>
       <ul id="stuckList"></ul>
+      <button type="button" id="stuckFull" class="primary">전체 화면으로 열기</button>
       <button type="button" id="stuckClose">닫기</button>
     </div>
     <iframe id="view" hidden title="프록시 화면"
@@ -133,6 +135,22 @@
       return `/p/${tok}/${u.protocol.slice(0, -1)}/${u.host}${u.pathname}${u.search}${u.hash}`;
     }
 
+    // 틀 안에서 안 보이는 사이트는 기억해 두고 다음부터 바로 전체 화면으로 연다
+    const FULL_KEY = 'proxyFullHosts';
+    function fullHosts() {
+      try { return JSON.parse(localStorage.getItem(FULL_KEY) || '[]'); } catch { return []; }
+    }
+    function rememberFull(host) {
+      const list = [host, ...fullHosts().filter((h) => h !== host)].slice(0, 50);
+      try { localStorage.setItem(FULL_KEY, JSON.stringify(list)); } catch { /* 괜찮음 */ }
+    }
+    async function openFull(url) {
+      let tok;
+      try { tok = await getToken(); } catch (e) { return showMessage(e.message, e.login); }
+      rememberFull(new URL(url).host);
+      location.href = proxyPath(url, tok);
+    }
+
     function showMessage(text, login) {
       view.hidden = true;
       start.hidden = false;
@@ -152,6 +170,7 @@
       try { new URL(url); } catch { return showMessage('주소가 올바르지 않아요.'); }
       let tok;
       try { tok = await getToken(); } catch (e) { return showMessage(e.message, e.login); }
+      if (fullHosts().includes(new URL(url).host)) return openFull(url);
       current = url;
       addr.value = url;
       msg.hidden = true;
@@ -193,6 +212,7 @@
     $('bigForm').addEventListener('submit', (e) => { e.preventDefault(); go($('bigInput').value); });
     $('reloadBtn').addEventListener('click', () => { if (current) go(current); });
     $('stuckClose').addEventListener('click', () => { $('stuck').hidden = true; });
+    $('stuckFull').addEventListener('click', () => { if (current) openFull(current); });
     $('homeBtn').addEventListener('click', () => {
       $('stuck').hidden = true;
       view.hidden = true; view.removeAttribute('src'); start.hidden = false; addr.value = ''; current = '';

@@ -172,9 +172,15 @@ tell();addEventListener('load',tell);addEventListener('popstate',tell);
 var E=[];if(${Number(code)}>=400)E.push('원래 사이트가 거절함: HTTP ${Number(code)}');function note(m){m=String(m).replace(P,'/p/…/');if(E.length<15&&E.indexOf(m)<0)E.push(m.slice(0,300))}
 addEventListener('error',function(e){var t=e.target;if(t&&t!==window&&t.nodeType===1)note('불러오기 실패: <'+t.tagName.toLowerCase()+'> '+(t.src||t.href||''));else note('오류: '+(e.message||e))},true);
 addEventListener('unhandledrejection',function(e){var r=e.reason;note('오류: '+(r&&(r.stack||r.message)||r))});
-function status(){try{var b=document.body,empty=!b||(b.innerText.trim()===''&&!b.querySelector('img,video,canvas,svg,iframe,input,button'));
+function vis(el){var c=getComputedStyle(el);return c.display!=='none'&&c.visibility!=='hidden'&&c.opacity!=='0'}
+function status(){try{var b=document.body,empty=!b||!vis(document.documentElement)||!vis(b)||(b.innerText.trim()===''&&!b.querySelector('img,video,canvas,svg,iframe,input,button'));
 parent!==window&&parent.postMessage({type:'proxy-status',empty:empty,errors:E},'*')}catch(e){}}
 setTimeout(status,8000);setTimeout(status,20000);
+if(window.top===window)(function add(){if(!document.body)return setTimeout(add,50);var h=document.createElement('div');
+h.style.cssText='position:fixed;right:14px;bottom:14px;z-index:2147483647';var sh=h.attachShadow?h.attachShadow({mode:'closed'}):h;
+var a=document.createElement('a');a.href='/apps/proxy/';a.textContent='← 프록시';a.title='프록시 화면으로';
+a.setAttribute('style','display:block;padding:9px 14px;border-radius:20px;background:#6366f1;color:#fff;font:600 14px system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:.85');
+sa.call(a,'href','/apps/proxy/');sh.appendChild(a);document.body.appendChild(h)})();
 })();</script>`;
 }
 
