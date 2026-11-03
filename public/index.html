@@ -11,8 +11,8 @@
         var n = window.name || '';
         if (n.indexOf('__px:') !== 0) return;
         var d = JSON.parse(n.slice(5));
+        if (Date.now() - d.t < 10000 && /^\/p\/[^\/?#]+\/https?\/[^\/?#]+$/.test(d.r)) return location.replace(d.r + location.pathname + location.search + location.hash);
         window.name = '';
-        if (Date.now() - d.t < 10000 && /^\/p\/[^\/?#]+\/https?\/[^\/?#]+$/.test(d.r)) location.replace(d.r + location.pathname + location.search + location.hash);
       } catch (e) { /* 무시 */ }
     })();
   </script>

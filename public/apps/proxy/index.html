@@ -153,6 +153,12 @@
       let tok;
       try { tok = await getToken(); } catch (e) { return showMessage(e.message, e.login); }
       rememberFull(new URL(url).host);
+      // 전체 화면에서도 탭에는 메인 사이트에서 정한 탭 모양(제목·아이콘)이 보이게 넘겨준다 (src/proxy.js 가 읽음)
+      try {
+        const { loadDisguise, iconFor } = await import('/disguise.js');
+        const d = loadDisguise();
+        window.name = '__px:' + JSON.stringify({ d: { title: d.title, icon: iconFor(d.domain) } });
+      } catch { /* 기본 모양(Google)으로 */ }
       location.href = proxyPath(url, tok);
     }
 
@@ -230,7 +236,8 @@
     });
     $('tabBtn').addEventListener('click', async () => {
       if (!current) return;
-      try { window.open(proxyPath(current, await getToken()), '_blank', 'noopener'); } catch (e) { showMessage(e.message, e.login); }
+      // 새 탭도 탭 모양이 유지되게, 새 탭에서 이 화면을 거쳐 전체 화면으로 연다
+      window.open('/apps/proxy/?full=' + encodeURIComponent(current), '_blank', 'noopener');
     });
     for (const [name, url] of QUICK) {
       const b = document.createElement('button');
@@ -240,7 +247,18 @@
       $('links').append(b);
     }
     // 들어올 때 로그인돼 있는지 미리 확인
-    getToken().catch((e) => showMessage(e.message, e.login));
+    const fullParam = new URLSearchParams(location.search).get('full');
+    if (fullParam && /^https?:\/\//i.test(fullParam)) {
+      history.replaceState(null, '', location.pathname);
+      openFull(fullParam);
+    } else {
+      getToken().catch((e) => showMessage(e.message, e.login));
+    }
+  </script>
+  <script type="module">
+    // 이 화면의 탭도 메인 사이트에서 정한 탭 모양으로
+    import { applyDisguise } from '/disguise.js';
+    applyDisguise();
   </script>
 </body>
 </html>

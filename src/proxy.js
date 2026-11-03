@@ -163,7 +163,9 @@ var TU=new URL(T),TO=TU.origin,ROOT=P+TU.protocol.slice(0,-1)+'/'+TU.host,HR=his
 try{if(PX.test(location.pathname))HR.call(history,history.state,'',TU.pathname+TU.search+location.hash)}catch(e){}
 function base(){var m=PX.exec(location.pathname);return m?m[1]+'://'+m[2]+location.search:TO+location.pathname+location.search}
 // 새로고침하거나 앱이 location 으로 다른 경로로 가면 이 사이트의 404 페이지가 window.name 을 보고 프록시로 되돌린다
-function mark(){try{window.name='__px:'+JSON.stringify({r:ROOT,t:Date.now()})}catch(e){}}
+// 프록시 화면이 window.name 에 넘겨준 탭 모양(제목·아이콘). 전체 화면일 때 탭에 그 사이트 대신 이걸 보여 준다.
+var D=null;try{if(String(window.name).indexOf('__px:')===0)D=JSON.parse(String(window.name).slice(5)).d||null}catch(e){}
+function mark(){try{window.name='__px:'+JSON.stringify({r:ROOT,t:Date.now(),d:D})}catch(e){}}
 mark();addEventListener('pagehide',mark);
 function px(r){try{var s=String(r);if(!s||/^(#|javascript:|data:|blob:|mailto:|tel:|about:)/i.test(s))return r;
 if(s.indexOf(O+'/p/')===0?PX.test(s.slice(O.length).split('?')[0]):PX.test(s.split('?')[0]))return r;var B=base(),u=new URL(s,B);if(u.origin===O)u=new URL(u.pathname+u.search+u.hash,B);
@@ -187,12 +189,26 @@ function local(u){try{var s=String(u),x=new URL(s,base());if(x.origin===O){var m
 return x.origin===TO?x.pathname+x.search+x.hash:s}catch(e){return u}}
 [['pushState',HP],['replaceState',HR]].forEach(function(a){history[a[0]]=function(st,t,u){if(u!=null)arguments[2]=local(u);var r=a[1].apply(this,arguments);tell();return r}});
 var A=['src','href','action','poster','data'];
-function fix(el){if(!el||el.nodeType!==1)return;for(var i=0;i<A.length;i++){var a=A[i];if(el.hasAttribute&&el.hasAttribute(a)){var v=el.getAttribute(a),n=px(v);if(n!==v)el.setAttribute(a,n)}}
+function fix(el){if(!el||el.nodeType!==1||el.__pxMine)return;for(var i=0;i<A.length;i++){var a=A[i];if(el.hasAttribute&&el.hasAttribute(a)){var v=el.getAttribute(a),n=px(v);if(n!==v)el.setAttribute(a,n)}}
 if(el.hasAttribute&&el.hasAttribute('integrity'))el.removeAttribute('integrity')}
 new MutationObserver(function(ms){ms.forEach(function(m){if(m.type==='attributes')fix(m.target);else m.addedNodes.forEach(function(n){fix(n);n.querySelectorAll&&n.querySelectorAll('[src],[href],[action],[poster]').forEach(fix)})})})
 .observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:A});
 document.addEventListener('submit',function(e){var fm=e.target;if(fm&&fm.getAttribute){var a=fm.getAttribute('action');if(a==null||a==='')fm.setAttribute('action',px(base()));}},true);
 function tell(){try{parent!==window&&parent.postMessage({type:'proxy-page',url:decodeURI(base()),title:document.title},'*')}catch(e){}}
+if(window.top===window)(function(){
+var DT=(D&&typeof D.title==='string'&&D.title)||'Google',
+DI=(D&&typeof D.icon==='string'&&(D.icon.indexOf('data:image/')===0||D.icon.indexOf('https://www.google.com/s2/favicons')===0)&&D.icon)||"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none' stroke='%239aa0a6' stroke-width='2.2'%3E%3Ccircle cx='16' cy='16' r='12'/%3E%3Cpath d='M4 16h24M16 4c4 4 4 20 0 24M16 4c-4 4-4 20 0 24'/%3E%3C/svg%3E";
+var RT='',busy=false;
+try{RT=document.title;Object.defineProperty(document,'title',{configurable:true,get:function(){return RT},set:function(v){RT=String(v)}})}catch(e){}
+function keep(){if(busy)return;busy=true;try{var h=document.head;if(!h)return;
+var ts=document.querySelectorAll('title');for(var i=0;i<ts.length;i++){if(ts[i].textContent!==DT){RT=ts[i].textContent;ts[i].textContent=DT}}
+if(!ts.length){var t=document.createElement('title');t.textContent=DT;h.appendChild(t)}
+var ls=h.querySelectorAll('link[rel~="icon"],link[rel="shortcut icon"],link[rel~="apple-touch-icon"]'),mine=null;
+for(var j=0;j<ls.length;j++){if(ls[j].__pxMine)mine=ls[j];else ls[j].remove()}
+if(!mine){mine=document.createElement('link');mine.__pxMine=1;sa.call(mine,'rel','icon');h.appendChild(mine)}
+if(mine.getAttribute('href')!==DI)sa.call(mine,'href',DI)}finally{busy=false}}
+keep();new MutationObserver(keep).observe(document.documentElement,{childList:true,subtree:true,characterData:true});
+})();
 tell();addEventListener('load',tell);addEventListener('popstate',tell);
 var E=[];if(${Number(code)}>=400)E.push('원래 사이트가 거절함: HTTP ${Number(code)}');function note(m){m=String(m).replace(P,'/p/…/');if(E.length<15&&E.indexOf(m)<0)E.push(m.slice(0,300))}
 addEventListener('error',function(e){var t=e.target;if(t&&t!==window&&t.nodeType===1)note('불러오기 실패: <'+t.tagName.toLowerCase()+'> '+(t.src||t.href||''));else note('오류: '+(e.message||e))},true);
