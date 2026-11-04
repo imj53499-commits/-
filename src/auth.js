@@ -318,7 +318,7 @@ async function changePassword(request, env) {
 
 // ---------- 관리자에게 문의 (로그인 안 해도 보낼 수 있음) ----------
 
-const CONTACT_PER_HOUR = 5;
+const CONTACT_PER_HOUR = 20; // 학교는 여럿이 같은 IP 를 써서 넉넉하게
 const MESSAGE_ID = /^\d{13}-[0-9a-f]{8}$/;
 
 async function contact(request, env) {

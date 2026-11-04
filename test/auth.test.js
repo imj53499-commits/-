@@ -166,7 +166,7 @@ test('세션 만료 시간이 설정된다', async () => {
   assert.ok(session.ttl > 0);
 });
 
-test('관리자에게 문의: 로그인 없이 보내고, 관리자만 보고 읽음/삭제, 1시간 5개까지', async () => {
+test('관리자에게 문의: 로그인 없이 보내고, 관리자만 보고 읽음/삭제, 1시간 20개까지', async () => {
   const send = (body, cookie) => call('/api/auth/contact', { method: 'POST', body, cookie });
   assert.equal((await send({ name: '', message: '안녕하세요' })).status, 400);
   assert.equal((await send({ name: '김민수', message: '' })).status, 400);
@@ -185,8 +185,8 @@ test('관리자에게 문의: 로그인 없이 보내고, 관리자만 보고 �
   await call('/api/admin/messages', { method: 'POST', body: { id: list[0].id, action: 'delete' }, cookie: a.cookie });
   assert.deepEqual((await call('/api/admin/messages', { cookie: a.cookie })).body, []);
 
-  for (let i = 0; i < 4; i++) assert.equal((await send({ name: '도배', message: '테스트 ' + i })).status, 201);
-  const blocked = await send({ name: '도배', message: '여섯 번째' });
+  for (let i = 0; i < 19; i++) assert.equal((await send({ name: '도배', message: '테스트 ' + i })).status, 201);
+  const blocked = await send({ name: '도배', message: '스물한 번째' });
   assert.equal(blocked.status, 429);
   assert.equal(blocked.body.code, 'RATE_LIMIT');
 });
