@@ -805,14 +805,15 @@ function route() {
   if (me.mustChange) return renderPassword(token, true);
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
 
+  // 로그인하면 맨 먼저(앱 목록보다 먼저) 이동 단축키부터 정해야 한다 (키보드가 없는 휴대폰은 빼고)
+  if (parts[0] === 'jump-setup') return renderJumpSetup(token, '#/');
+  if (needsJumpSetup()) return renderJumpSetup(token, location.hash && location.hash !== '#' ? location.hash : '#/');
+
   // 프록시: 화면(public/apps/proxy/)을 이 페이지 안에 띄운다. 그래서 방문 기록에는 /#/proxy 만 남는다.
   if (parts[0] === 'proxy') return renderProxy(token);
 
-  // 유튜브를 처음 쓸 때는 이동 단축키부터 정해야 한다 (키보드가 없는 휴대폰은 빼고)
   // 관리자가 유튜브 앱을 안 보이게 했으면
   if (parts.length && hiddenApps.has('youtube')) return renderAppHidden();
-  if (parts[0] === 'jump-setup') return renderJumpSetup(token, '#/youtube');
-  if (parts.length && needsJumpSetup()) return renderJumpSetup(token, location.hash);
 
   if (parts[0] === 'shorts') return renderShorts(token);
   if (parts[0] === 'watch' && /^[\w-]{11}$/.test(parts[1] || '')) return renderWatch(parts[1], token);
@@ -1836,8 +1837,28 @@ function renderJumpSetup(token, next) {
     pickingJumpKey = on;
   };
 
-  const urlInput = el('input', { type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false', placeholder: '예: classroom.google.com', 'aria-label': '이동할 사이트 주소' });
-  if (jump) urlInput.value = jump.url;
+  const urlInput = el('input', { type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false', placeholder: '예: 학교 홈페이지 주소', 'aria-label': '이동할 사이트 주소' });
+  // 이동할 사이트: Google / Google 클래스룸 / 직접 입력 중에서 고른다
+  const choices = [
+    { id: 'google', label: 'Google', url: 'https://www.google.com/' },
+    { id: 'classroom', label: 'Google 클래스룸', url: 'https://classroom.google.com/' },
+    { id: 'custom', label: '직접 입력', url: '' }
+  ];
+  let choice = !jump ? 'google' : (choices.find((c) => c.url && c.url === jump.url)?.id || 'custom');
+  if (jump && choice === 'custom') urlInput.value = jump.url;
+  const choiceBtns = choices.map((c) => el('button', {
+    type: 'button', class: 'jump-choice', role: 'radio', text: c.label,
+    onclick: () => { choice = c.id; showChoice(); if (c.id === 'custom') urlInput.focus(); }
+  }));
+  const choiceRow = el('div', { class: 'jump-choices', role: 'radiogroup', 'aria-label': '이동할 사이트' }, ...choiceBtns);
+  function showChoice() {
+    choices.forEach((c, i) => {
+      choiceBtns[i].classList.toggle('active', c.id === choice);
+      choiceBtns[i].setAttribute('aria-checked', String(c.id === choice));
+    });
+    urlInput.hidden = choice !== 'custom';
+  }
+  showChoice();
   const keyBtn = el('button', { type: 'button', class: 'jump-key' });
   const message = el('p', { class: 'auth-message', role: 'alert' });
   const showKey = () => {
@@ -1873,8 +1894,9 @@ function renderJumpSetup(token, next) {
 
   const form = el('form', { class: 'auth-form', novalidate: '' },
     el('label', { class: 'jump-label', text: '① 이동할 사이트' }),
+    choiceRow,
     urlInput,
-    el('span', { class: 'jump-hint', text: '이 키를 누르면 이 사이트로 바로 바뀌어요. 예: 클래스룸, 구글 문서, 학교 홈페이지' }),
+    el('span', { class: 'jump-hint', text: '단축키를 누르면 이 사이트로 바로 바뀌어요. 다른 사이트는 \'직접 입력\'에서 주소를 넣어 주세요.' }),
     el('label', { class: 'jump-label', text: '② 단축키' }),
     keyBtn,
     el('span', { class: 'jump-hint', text: 'Ctrl + 키처럼 조합해도 돼요. 글자 키 하나만 정하면 검색창에 글자를 칠 때는 동작하지 않아요.' }),
@@ -1882,9 +1904,9 @@ function renderJumpSetup(token, next) {
     el('button', { type: 'submit', class: 'auth-submit' }, el('span', { text: '저장하고 시작하기' })));
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const url = cleanJumpUrl(urlInput.value);
+    const url = choice === 'custom' ? cleanJumpUrl(urlInput.value) : choices.find((c) => c.id === choice).url;
     if (!url) {
-      message.textContent = '이동할 사이트 주소를 확인해 주세요. (예: classroom.google.com)';
+      message.textContent = '이동할 사이트 주소를 확인해 주세요. (예: www.naver.com)';
       urlInput.focus();
       return;
     }
@@ -1901,7 +1923,7 @@ function renderJumpSetup(token, next) {
 
   app.replaceChildren(el('div', { class: 'jump-setup' },
     authCard('이동 단축키 정하기', '처음 한 번만 정하면 돼요. 정한 키를 누르면 정한 사이트로 바로 이동해요.', form)));
-  urlInput.focus();
+  if (choice === 'custom') urlInput.focus();
 }
 
 window.addEventListener('keydown', (e) => {
