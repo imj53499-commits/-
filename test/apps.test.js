@@ -2,6 +2,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleRequest } from '../src/server.js';
 import { clearCache } from '../src/api.js';
+import { handleProxy, clearAllowCache } from '../src/proxy.js';
 
 function fakeKV() {
   const store = new Map();
@@ -102,4 +103,31 @@ test('프록시를 안 보이게 하면 프록시 표도 못 받는다', async (
   assert.equal(res.status, 403);
   assert.equal(res.body.code, 'APP_HIDDEN');
   assert.equal((await call(admin, '/api/proxy/token', {})).status, 200);
+});
+
+test('프록시를 숨기거나 승인 취소하면 이미 받은 표도 바로 못 쓴다', async () => {
+  clearAllowCache();
+  const admin = await adminCookie();
+  const a = await userCookie('minsu');
+  const tok = (await call(a, '/api/proxy/token', {})).body.token;
+  const fake = async () => new Response('x', { headers: { 'content-type': 'image/png' } });
+  const use = (t) => handleProxy(new Request(`https://site.test/p/${t}/https/example.com/a.png`), env, fake);
+  assert.equal((await use(tok)).status, 200);
+
+  await call(admin, '/api/admin/apps', { id: 'proxy', mode: 'none' });
+  clearAllowCache(); // 실제로는 최대 30초 뒤
+  assert.equal((await use(tok)).status, 403);
+  // 관리자 표는 그대로 된다
+  const adminTok = (await call(admin, '/api/proxy/token', {})).body.token;
+  assert.equal((await use(adminTok)).status, 200);
+
+  // 다시 보이게 하면 다시 된다
+  await call(admin, '/api/admin/apps', { id: 'proxy', mode: 'all' });
+  clearAllowCache();
+  assert.equal((await use(tok)).status, 200);
+
+  // 승인 취소(또는 차단)돼도 막힌다
+  await env.DB.put('user:minsu', JSON.stringify({ username: 'minsu', name: 'minsu', status: 'blocked', pwv: 0 }));
+  clearAllowCache();
+  assert.equal((await use(tok)).status, 403);
 });

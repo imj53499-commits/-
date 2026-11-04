@@ -41,10 +41,16 @@ test('주소 해석', () => {
 
 test('표: 서명·만료 확인', async () => {
   const t = await makeToken('pw', Date.now() + 1000);
-  assert.equal(await checkToken('pw', t), true);
-  assert.equal(await checkToken('other', t), false);
-  assert.equal(await checkToken('pw', t, Date.now() + 5000), false);
-  assert.equal(await checkToken('pw', t.slice(0, -1) + (t.endsWith('0') ? '1' : '0')), false);
+  assert.equal(await checkToken('pw', t), 'admin');
+  assert.equal(await checkToken('other', t), '');
+  assert.equal(await checkToken('pw', t, Date.now() + 5000), '');
+  assert.equal(await checkToken('pw', t.slice(0, -1) + (t.endsWith('0') ? '1' : '0')), '');
+  // 누구인지도 표에 들어 있고, 바꿔치기하면 서명이 안 맞는다
+  const u = await makeToken('pw', Date.now() + 1000, 'u:민수');
+  assert.equal(await checkToken('pw', u), 'u:민수');
+  const [exp, , sig] = u.split('.');
+  const forged = `${exp}.${Buffer.from('admin').toString('base64url')}.${sig}`;
+  assert.equal(await checkToken('pw', forged), '');
 });
 
 test('handleProxy: 표가 없으면 막고, 쿠키는 안 보내고, 응답에 sandbox 를 붙인다', async () => {
@@ -87,8 +93,8 @@ test('handleProxy: 다른 곳으로 보내기(redirect) 주소도 바꾼다', as
 test('표는 6시간 단위라 같은 시간대엔 같고, 6~12시간 남는다', async () => {
   const { tokenResponse } = await import('../src/proxy.js');
   const env = { ADMIN_PASSWORD: 'pw' };
-  const a = await (await tokenResponse(env, { role: 'user' })).json();
-  const b = await (await tokenResponse(env, { role: 'user' })).json();
+  const a = await (await tokenResponse(env, { role: 'user', username: 'MinSu' })).json();
+  const b = await (await tokenResponse(env, { role: 'user', username: 'minsu' })).json();
   assert.equal(a.token, b.token);
   const left = a.expiresAt - Date.now();
   assert.ok(left > 6 * 3600e3 - 1000 && left <= 12 * 3600e3, String(left));

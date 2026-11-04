@@ -13,6 +13,8 @@
 
 // 표는 6시간 단위로 끊어서 만든다 (남은 시간 6~12시간). 같은 시간대엔 표가 같아서 프록시 주소도 같고,
 // 그래서 브라우저 캐시가 그대로 먹힌다 (표가 매번 바뀌면 그림·CSS 를 매번 새로 받아서 느림).
+import { loadAccess, canUseApp } from './apps.js';
+
 const TOKEN_STEP = 6 * 60 * 60 * 1000;
 // 그림·CSS·JS·글꼴은 Cloudflare 와 브라우저에 하루 동안 저장해 두고 다시 쓴다
 const STATIC_DEST = new Set(['image', 'style', 'script', 'font', 'audio', 'video', 'track', 'manifest']);
@@ -32,25 +34,56 @@ async function hmacHex(secret, text) {
   return [...new Uint8Array(sig)].slice(0, 16).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function makeToken(secret, expiresAt) {
+// 표: <만료 시각>.<누구(base64url)>.<서명>. 누구 = 'admin' 또는 'u:<아이디(소문자)>'
+export async function makeToken(secret, expiresAt, who = 'admin') {
   const exp = String(Math.floor(expiresAt));
-  return `${exp}.${await hmacHex(secret, exp)}`;
+  const w = b64e(unescape(encodeURIComponent(who)));
+  return `${exp}.${w}.${await hmacHex(secret, `${exp}.${w}`)}`;
 }
 
+// 맞는 표면 '누구'를, 아니면 '' 를 돌려준다
 export async function checkToken(secret, token, now = Date.now()) {
-  const m = /^(\d{10,16})\.([0-9a-f]{32})$/.exec(token || '');
-  if (!m || Number(m[1]) < now) return false;
-  const want = await hmacHex(secret, m[1]);
+  const m = /^(\d{10,16})\.([A-Za-z0-9_-]{4,80})\.([0-9a-f]{32})$/.exec(token || '');
+  if (!m || Number(m[1]) < now) return '';
+  const want = await hmacHex(secret, `${m[1]}.${m[2]}`);
   let diff = 0;
-  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ m[2].charCodeAt(i);
-  return diff === 0;
+  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ m[3].charCodeAt(i);
+  if (diff !== 0) return '';
+  try {
+    return decodeURIComponent(escape(atob(m[2].replace(/-/g, '+').replace(/_/g, '/'))));
+  } catch {
+    return '';
+  }
+}
+
+// 이 사람이 지금도 프록시를 써도 되는지: 승인된 계정이고, 관리자가 프록시를 숨기지 않았는지.
+// 숨기거나 승인 취소·차단하면 이미 받은 표도 바로(최대 30초 안에) 못 쓰게 된다.
+// 그림 하나하나마다 KV 를 읽지 않게 30초 동안 기억한다.
+const ALLOW_MS = 30 * 1000;
+const allowCache = new Map(); // 누구 → { at, ok }
+export function clearAllowCache() { allowCache.clear(); }
+
+async function stillAllowed(env, who) {
+  if (who === 'admin') return true;
+  if (!who.startsWith('u:')) return false;
+  const hit = allowCache.get(who);
+  if (hit && Date.now() - hit.at < ALLOW_MS) return hit.ok;
+  const username = who.slice(2);
+  const user = await env.DB.get(`user:${username}`, 'json');
+  const ok = !!user && user.status === 'approved' &&
+    canUseApp(await loadAccess(env), { role: 'user', username: user.username || username }, 'proxy');
+  if (allowCache.size > 500) allowCache.clear();
+  allowCache.set(who, { at: Date.now(), ok });
+  return ok;
 }
 
 // 로그인한 사람에게 표를 준다 (server.js 에서 세션 확인 뒤 부름)
 export async function tokenResponse(env, session) {
   if (!env.ADMIN_PASSWORD) return jsonRes({ error: '프록시를 쓰려면 ADMIN_PASSWORD 를 설정해야 해요.' }, 503);
   const expiresAt = Math.ceil((Date.now() + TOKEN_STEP) / TOKEN_STEP) * TOKEN_STEP;
-  return jsonRes({ token: await makeToken(env.ADMIN_PASSWORD, expiresAt), expiresAt });
+  const who = session.role === 'admin' ? 'admin' : `u:${session.username.toLowerCase()}`;
+  allowCache.delete(who); // 방금 허락받았으니 예전에 기억한 '안 됨'은 지운다
+  return jsonRes({ token: await makeToken(env.ADMIN_PASSWORD, expiresAt, who), expiresAt });
 }
 
 function jsonRes(data, status = 200) {
@@ -362,7 +395,12 @@ export async function handleProxy(request, env, fetchFn = fetch) {
   if (!env.DB || !env.ADMIN_PASSWORD) return notice('프록시는 로그인 기능(KV 저장소 DB)과 ADMIN_PASSWORD 를 설정해야 쓸 수 있어요.', 503);
   const parsed = parseProxyUrl(url);
   if (!parsed) return notice('주소가 올바르지 않아요.', 400);
-  if (!(await checkToken(env.ADMIN_PASSWORD, parsed.token))) {
+  const who = await checkToken(env.ADMIN_PASSWORD, parsed.token);
+  if (who && !(await stillAllowed(env, who))) {
+    return notice('이 앱은 쓸 수 없어요. 관리자에게 문의해 주세요.', 403,
+      `<script>parent!==window&&parent.postMessage({type:'proxy-expired'},'*')</script>`);
+  }
+  if (!who) {
     // 바깥 화면(/apps/proxy/)이 이걸 받으면 새 표를 받아서 다시 연다
     return notice('프록시 사용 시간이 끝났어요. 앱 목록에서 프록시를 다시 열어 주세요.', 403,
       `<script>parent!==window&&parent.postMessage({type:'proxy-expired'},'*')</script>`);
