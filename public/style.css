@@ -657,3 +657,11 @@ body.app-mode .content, body.app-mode.sidebar-collapsed .content { padding-left:
 .notice-editor { display: flex; flex-direction: column; gap: 8px; }
 .notice-editor input, .notice-editor textarea { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: inherit; font: inherit; font-size: 14px; }
 .notice-editor textarea { resize: vertical; line-height: 1.5; }
+
+/* 점검 */
+.auth-message.maintenance { white-space: pre-line; }
+.maintenance-admin.on { padding: 0 14px 14px; border: 2px solid #f59e0b; border-radius: 14px; background: rgba(245, 158, 11, .08); }
+.maintenance-admin.on h2 { color: #b45309; }
+.maintenance-until { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-sub); flex-wrap: wrap; }
+.maintenance-until input { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: inherit; font: inherit; }
+.app-access-head .danger { color: #fff; background: #e5484d; }

@@ -3,6 +3,7 @@ import { handleAuth, getSession, blockDevice, deviceBlockResponse, json, ELSEWHE
 import { tokenResponse } from './proxy.js';
 import { handleApps, loadAccess, canUseApp } from './apps.js';
 import { handleNotice } from './notice.js';
+import { loadMaintenance, maintenanceResponse, handleMaintenanceAdmin } from './maintenance.js';
 
 // /api/* 요청의 입구. 계정 관련 요청은 auth 로, 나머지(영상 API)는 승인된 사용자만 쓸 수 있다.
 // 로그인 없이는 아무것도 못 쓴다. KV 저장소(DB)를 연결하지 않았으면 로그인을 할 수 없으니 전부 막는다.
@@ -15,6 +16,16 @@ export async function handleRequest(request, env, yt) {
   if (!allowed) {
     const blocked = await deviceBlockResponse(request, env);
     if (blocked) return blocked;
+  }
+  // 점검 중이면 관리자 말고는 못 쓴다 (관리자 화면·관리자 로그인·문의하기는 됨)
+  if (!url.pathname.startsWith('/api/admin/') && !url.pathname.startsWith('/api/auth/contact')) {
+    const maintenance = await loadMaintenance(env);
+    if (maintenance?.on && (await getSession(request, env))?.role !== 'admin') return maintenanceResponse(maintenance);
+  }
+  // 점검 켜기·끄기 (관리자만)
+  if (url.pathname === '/api/admin/maintenance') {
+    if ((await getSession(request, env))?.role !== 'admin') return json({ error: '관리자 로그인이 필요해요.', code: 'ADMIN_REQUIRED' }, 401);
+    return handleMaintenanceAdmin(request, env);
   }
   // 앱 보이기 설정 (/api/apps, /api/apps/check, 관리자용 /api/admin/apps)
   const isApps = ['/api/apps', '/api/apps/check', '/api/admin/apps'].includes(url.pathname);

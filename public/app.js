@@ -43,6 +43,9 @@ function el(tag, props = {}, ...children) {
 // 차단된 계정·기기면 서버가 알려 준 안내를 담아 두고 차단 화면만 보여 준다.
 let blockedNotice = '';
 
+// 점검 중이면 서버가 알려 준 안내 ({ message, until }), 아니면 null
+let maintenance = null;
+
 // 로그인 화면에 띄울 안내 (예: 다른 기기에서 같은 계정으로 로그인했을 때)
 let loginNotice = '';
 
@@ -68,6 +71,11 @@ async function api(path, { method = 'GET', body } = {}) {
       setTimeout(route, 0);
     }
     if (data.code === 'BLOCKED') blockedNotice = data.error;
+    if (data.code === 'MAINTENANCE') {
+      const first = !maintenance;
+      maintenance = { message: data.error, until: data.until || 0 };
+      if (first && me) setTimeout(route, 0);
+    }
     if (data.code === 'LOGGED_IN_ELSEWHERE') loginNotice = data.error;
     const err = new Error(data.error || `요청 실패 (${res.status})`);
     err.code = data.code;
@@ -801,6 +809,7 @@ function route() {
   if (parts[0] === 'contact') return renderContact(token);
   if (parts[0] === 'replies') return renderReplies(token);
   if (blockedNotice) return renderBlocked();
+  if (maintenance) return renderMaintenance(token);
   if (!me) return renderAuth(token);
   if (me.mustChange) return renderPassword(token, true);
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
@@ -876,6 +885,31 @@ function renderBlocked() {
       el('button', { type: 'button', class: 'auth-submit', onclick: () => location.reload() }, el('span', { text: '다시 확인' })),
       el('p', { class: 'auth-foot', text: '관리자가 차단을 풀면 다시 확인을 눌러 주세요' }),
       el('a', { class: 'auth-link', href: '#/contact', text: '잘못 막혔나요? 관리자에게 문의하기' }))));
+}
+
+// 점검 중: 관리자 말고는 이 화면만 보인다. 1분마다 끝났는지 확인한다.
+function renderMaintenance(token) {
+  setTitle();
+  setActiveNav('');
+  document.body.classList.add('auth-mode');
+  const recheck = async () => {
+    maintenance = null;
+    await loadMe();
+    if (token === renderToken || !maintenance) route();
+  };
+  const until = maintenance.until
+    ? `${new Date(maintenance.until).toLocaleString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit' })}에 끝날 예정이에요`
+    : '';
+  app.replaceChildren(authCard('점검 중이에요', until || '조금만 기다려 주세요',
+    el('div', { class: 'auth-form' },
+      el('p', { class: 'auth-message wait maintenance', role: 'status', text: maintenance.message }),
+      el('button', { type: 'button', class: 'auth-submit', onclick: recheck }, el('span', { text: '다시 확인' })),
+      el('p', { class: 'auth-foot', text: '점검이 끝나면 자동으로 다시 열려요' }),
+      el('a', { class: 'auth-link', href: '#/contact', text: '관리자에게 문의하기' }))));
+  const timer = setInterval(() => {
+    if (token !== renderToken) return clearInterval(timer);
+    recheck();
+  }, 60 * 1000);
 }
 
 // 입력칸: 왼쪽 아이콘 + 입력 + (비밀번호면 보기 버튼) + 아래 안내 문구
@@ -1247,6 +1281,7 @@ async function renderAdmin(token) {
       submit.disabled = true;
       try {
         me = await api('/api/admin/login', { method: 'POST', body: { password: password.value } });
+        maintenance = null; // 관리자는 점검 중에도 쓸 수 있다
         hiddenApps = new Set();
         blockedNotice = ''; // 관리자가 로그인하면 이 기기의 차단도 풀린다
         route();
@@ -1271,10 +1306,13 @@ async function renderAdmin(token) {
   let messages;
   let access;
   let notice;
+  let maint;
   try {
     let noticeRes;
-    [users, messages, access, noticeRes] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages'), api('/api/admin/apps'), api('/api/admin/notice')]);
+    let maintRes;
+    [users, messages, access, noticeRes, maintRes] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages'), api('/api/admin/apps'), api('/api/admin/notice'), api('/api/admin/maintenance')]);
     notice = noticeRes.notice;
+    maint = maintRes.maintenance;
   } catch (err) {
     if (token !== renderToken) return;
     if (err.code === 'ADMIN_REQUIRED') { me = null; return route(); }
@@ -1419,10 +1457,46 @@ async function renderAdmin(token) {
           ? el('ul', { class: 'admin-list' }, ...list.map(userRow))
           : el('p', { class: 'admin-empty', text: status === 'pending' ? '기다리는 사람이 없어요.' : '없음' }));
     });
-    body.replaceChildren(inbox, noticeSection(), appAccessSection(), ...sections);
+    body.replaceChildren(maintenanceSection(), inbox, noticeSection(), appAccessSection(), ...sections);
   }
 
   // 앱 보이기: 앱마다 모두 / 선택한 사람만 / 아무도 안 보임 (관리자는 언제나 다 보임)
+  // 점검: 켜면 관리자 말고는 아무도 못 들어오고 점검 화면만 보인다
+  function maintenanceSection() {
+    const message = el('textarea', { rows: '3', maxlength: '500', placeholder: '점검 안내 (비워 두면 기본 문구)', 'aria-label': '점검 안내' });
+    message.value = maint?.message || '';
+    const until = el('input', { type: 'datetime-local', 'aria-label': '끝날 예정 시각 (안 정해도 됨)' });
+    if (maint?.until) {
+      const d = new Date(maint.until);
+      until.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    }
+    const status = el('span', { class: 'app-access-status', role: 'status' });
+    const set = async (on) => {
+      if (on && !confirm('점검을 시작할까요? 관리자 말고는 아무도 사이트를 못 써요.')) return;
+      try {
+        const untilMs = until.value ? new Date(until.value).getTime() : 0;
+        maint = (await api('/api/admin/maintenance', { method: 'POST', body: { on, message: message.value, until: untilMs } })).maintenance;
+        draw();
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    };
+    return el('section', { class: `admin-section maintenance-admin${maint?.on ? ' on' : ''}` },
+      el('h2', { text: maint?.on ? '점검 중 🔧' : '점검' }),
+      el('p', { class: 'admin-empty', text: maint?.on
+        ? `지금 점검 중이에요 (${new Date(maint.startedAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}부터). 관리자 말고는 아무도 못 들어와요. 바뀐 게 퍼지는 데 10초쯤 걸려요.`
+        : '점검을 시작하면 관리자 말고는 아무도 못 들어오고 점검 안내 화면만 보여요. 관리자 화면과 문의하기는 돼요.' }),
+      el('div', { class: 'notice-editor' },
+        message,
+        el('label', { class: 'maintenance-until' }, el('span', { text: '끝날 예정 (안 정해도 됨)' }), until),
+        el('div', { class: 'app-access-head' },
+          maint?.on
+            ? el('button', { type: 'button', class: 'approve', text: '점검 끝내기', onclick: () => set(false) })
+            : el('button', { type: 'button', class: 'danger', text: '점검 시작', onclick: () => set(true) }),
+          maint?.on ? el('button', { type: 'button', text: '안내 고치기', onclick: () => set(true) }) : null,
+          status)));
+  }
+
   // 공지·패치노트 쓰기: 저장하면 로그인한 사람들에게 들어올 때 팝업으로 뜬다
   function noticeSection() {
     const title = el('input', { type: 'text', maxlength: '60', placeholder: '제목 (예: 패치노트)', 'aria-label': '공지 제목' });
