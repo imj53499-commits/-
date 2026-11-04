@@ -20,7 +20,8 @@ const STATIC_TYPE = /^(image|font|audio|video)\/|^text\/css|javascript|^applicat
 const STATIC_TTL = 24 * 60 * 60;
 export const PREFIX = '/p/';
 
-const SANDBOX_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock';
+// 새 창(팝업)은 막는다. 새 탭으로 여는 링크·window.open 은 아래 스크립트가 프록시 화면 안에서 열게 바꾼다.
+const SANDBOX_CSP = 'sandbox allow-scripts allow-forms allow-modals allow-downloads allow-pointer-lock';
 
 // ---------- 표 (서명) ----------
 
@@ -186,7 +187,7 @@ var TU=new URL(T),TO=TU.origin,ROOT=P+'x/'+E64(TO),HR=history.replaceState,HP=hi
 try{if(dec(location.pathname))HR.call(history,history.state,'',TU.pathname+TU.search+location.hash)}catch(e){}
 function base(){var d=dec(location.pathname);return d?d+location.search:TO+location.pathname+location.search}
 // 새로고침하거나 앱이 location 으로 다른 경로로 가면 이 사이트의 404 페이지가 window.name 을 보고 프록시로 되돌린다
-// 프록시 화면이 window.name 에 넘겨준 탭 모양(제목·아이콘). 전체 화면일 때 탭에 그 사이트 대신 이걸 보여 준다.
+// 프록시 주소를 탭에서 바로 열었을 때도 탭에는 그 사이트 대신 탭 모양(window.name 으로 받은 것, 없으면 Google)을 보여 준다.
 var D=null;try{if(String(window.name).indexOf('__px:')===0)D=JSON.parse(String(window.name).slice(5)).d||null}catch(e){}
 function mark(){try{window.name='__px:'+JSON.stringify({r:ROOT,t:Date.now(),d:D})}catch(e){}}
 mark();addEventListener('pagehide',mark);
@@ -198,7 +199,12 @@ var f=window.fetch;if(f)window.fetch=function(i,o){try{if(typeof i==='string'||i
 var w=typeof i==='string'?i:(i&&i.url)||'';return f.call(this,i,o).then(function(r){if(r.status>=400)note('요청 실패 '+r.status+': '+w);return r},function(e){note('요청 실패: '+w);throw e})};
 var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){arguments[1]=px(u);var w=arguments[1],x=this;
 if(!x.__pxl){x.__pxl=1;x.addEventListener('loadend',function(){if(x.status>=400||x.status===0)note('요청 실패 '+(x.status||'')+': '+x.__pxw)})}x.__pxw=w;return xo.apply(this,arguments)};
-var wo=window.open;window.open=function(u){if(u)arguments[0]=px(u);return wo.apply(this,arguments)};
+// 새 탭·새 창 대신 지금 화면에서 연다 (전체 화면·새 탭 없이 프록시 화면 안에서만 보기)
+window.open=function(u){if(u){try{location.href=px(u)}catch(e){}}return window};
+function same(t){return t&&t!=='_self'}
+document.addEventListener('click',function(e){var a=e.target&&e.target.closest&&e.target.closest('a[href],area[href]');if(!a)return;
+var bt=document.querySelector('base[target]');if(same(a.getAttribute('target')||(bt&&bt.getAttribute('target'))))sa.call(a,'target','_self')},true);
+document.addEventListener('submit',function(e){var fm=e.target;var bt=document.querySelector('base[target]');if(fm&&same(fm.getAttribute('target')||(bt&&bt.getAttribute('target'))))sa.call(fm,'target','_self')},true);
 if(navigator.sendBeacon){var sb=navigator.sendBeacon.bind(navigator);navigator.sendBeacon=function(u,d){return sb(px(u),d)}}
 try{navigator.serviceWorker&&Object.defineProperty(navigator,'serviceWorker',{get:function(){return undefined}})}catch(e){}
 function hook(C,prop){try{var d=C&&Object.getOwnPropertyDescriptor(C.prototype,prop);if(!d||!d.set)return;

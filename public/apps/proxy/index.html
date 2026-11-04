@@ -67,9 +67,6 @@
     <button class="btn" id="warnBtn" hidden title="문제 보기" aria-label="문제 보기" style="color:#f59e0b">
       <svg viewBox="0 0 24 24"><path d="M12 3l10 18H2zM12 10v5M12 18v.01"/></svg>
     </button>
-    <button class="btn" id="tabBtn" title="새 탭에서 열기" aria-label="새 탭에서 열기">
-      <svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
-    </button>
   </div>
   <main>
     <div class="start" id="start">
@@ -81,13 +78,12 @@
     </div>
     <div class="stuck" id="stuck" hidden>
       <h2 id="stuckTitle">화면이 안 나왔어요</h2>
-      <p>인스타그램처럼 <b>다른 사이트 안에 들어가 있으면 일부러 안 보이는</b> 사이트가 있어요. '전체 화면으로 열기'를 눌러 보세요. 그래도 안 되면 아래 내용을 캡처해서 보내 주세요.</p>
+      <p>이 사이트는 프록시로 잘 안 열리는 것 같아요. 인스타그램처럼 <b>다른 사이트 안에 들어가 있으면 일부러 안 보이는</b> 사이트도 있어요. 아래 내용을 캡처해서 보내 주면 고칠 수 있는지 볼게요.</p>
       <ul id="stuckList"></ul>
-      <button type="button" id="stuckFull" class="primary">전체 화면으로 열기</button>
       <button type="button" id="stuckClose">닫기</button>
     </div>
     <iframe id="view" hidden title="프록시 화면"
-      sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock"
+      sandbox="allow-scripts allow-forms allow-modals allow-downloads allow-pointer-lock"
       allow="fullscreen; autoplay; encrypted-media; picture-in-picture" referrerpolicy="no-referrer"></iframe>
   </main>
   <script>
@@ -142,32 +138,8 @@
       return `/p/${tok}/x/${code}${u.pathname}${u.search}${u.hash}`;
     }
 
-    // 틀 안에서 안 보이는 사이트는 기억해 두고 다음부터 바로 전체 화면으로 연다
-    const FULL_KEY = 'proxyFullHosts';
-    function fullHosts() {
-      try { return JSON.parse(localStorage.getItem(FULL_KEY) || '[]'); } catch { return []; }
-    }
-    function rememberFull(host) {
-      const list = [host, ...fullHosts().filter((h) => h !== host)].slice(0, 50);
-      try { localStorage.setItem(FULL_KEY, JSON.stringify(list)); } catch { /* 괜찮음 */ }
-    }
-    // 메인 사이트의 #/proxy 화면 안에 들어가 있으면, 전체 화면은 바깥(탭 전체)에서 연다
-    const TOPW = (() => {
-      try { return window.top !== window && window.top.location.origin === location.origin ? window.top : window; } catch { return window; }
-    })();
-
-    async function openFull(url) {
-      let tok;
-      try { tok = await getToken(); } catch (e) { return showMessage(e.message, e.login); }
-      rememberFull(new URL(url).host);
-      // 전체 화면에서도 탭에는 메인 사이트에서 정한 탭 모양(제목·아이콘)이 보이게 넘겨준다 (src/proxy.js 가 읽음)
-      try {
-        const { loadDisguise, iconFor } = await import('/disguise.js');
-        const d = loadDisguise();
-        TOPW.name = '__px:' + JSON.stringify({ d: { title: d.title, icon: iconFor(d.domain) } });
-      } catch { /* 기본 모양(Google)으로 */ }
-      TOPW.location.href = proxyPath(url, tok);
-    }
+    // 예전 '전체 화면' 기능이 남긴 기록은 지운다
+    try { localStorage.removeItem('proxyFullHosts'); } catch { /* 괜찮음 */ }
 
     function showMessage(text, login) {
       view.hidden = true;
@@ -188,7 +160,6 @@
       try { new URL(url); } catch { return showMessage('주소가 올바르지 않아요.'); }
       let tok;
       try { tok = await getToken(); } catch (e) { return showMessage(e.message, e.login); }
-      if (fullHosts().includes(new URL(url).host)) return openFull(url);
       current = url;
       addr.value = url;
       msg.hidden = true;
@@ -235,18 +206,10 @@
     $('reloadBtn').addEventListener('click', () => { if (current) go(current); });
     $('stuckClose').addEventListener('click', () => { $('stuck').hidden = true; });
     $('warnBtn').addEventListener('click', () => { $('stuck').hidden = !$('stuck').hidden; });
-    $('stuckFull').addEventListener('click', () => { if (current) openFull(current); });
     $('homeBtn').addEventListener('click', () => {
       $('stuck').hidden = true;
       view.hidden = true; view.removeAttribute('src'); start.hidden = false; addr.value = ''; current = '';
       $('bigInput').focus();
-    });
-    $('tabBtn').addEventListener('click', async () => {
-      if (!current) return;
-      // 새 탭도 탭 모양이 유지되게, 새 탭에서 이 화면을 거쳐 전체 화면으로 연다
-      // 주소는 감춰서 넘긴다 (방문 기록에 사이트 이름이 안 보이게)
-      const code = btoa(unescape(encodeURIComponent(current))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      window.open('/#/proxy?full=' + code, '_blank', 'noopener');
     });
     for (const [name, url] of QUICK) {
       const b = document.createElement('button');
@@ -256,17 +219,7 @@
       $('links').append(b);
     }
     // 들어올 때 로그인돼 있는지 미리 확인
-    let fullParam = '';
-    try {
-      const code = new URLSearchParams(location.search).get('full') || '';
-      fullParam = code && decodeURIComponent(escape(atob(code.replace(/-/g, '+').replace(/_/g, '/'))));
-    } catch { /* 이상한 값은 무시 */ }
-    if (fullParam && /^https?:\/\//i.test(fullParam)) {
-      history.replaceState(null, '', location.pathname);
-      openFull(fullParam);
-    } else {
-      getToken().catch((e) => showMessage(e.message, e.login));
-    }
+    getToken().catch((e) => showMessage(e.message, e.login));
   </script>
   <script type="module">
     // 이 화면의 탭도 메인 사이트에서 정한 탭 모양으로

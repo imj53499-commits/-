@@ -199,7 +199,7 @@ function renderAppHidden() {
     el('a', { class: 'auth-link', href: '#/', text: '앱 목록으로' })));
 }
 
-async function renderProxy(token, full) {
+async function renderProxy(token) {
   setTitle();
   setActiveNav('');
   document.body.classList.add('app-mode', 'proxy-mode');
@@ -214,10 +214,7 @@ async function renderProxy(token, full) {
     return;
   }
   if (token !== renderToken) return;
-  const src = '/apps/proxy/' + (/^[\w-]+$/.test(full) ? `?full=${full}` : '');
-  // 새 탭으로 열린 거면(?full=) 주소에서 지워 둔다
-  if (full) history.replaceState(null, '', '#/proxy');
-  app.replaceChildren(el('iframe', { class: 'proxy-frame', src, title: '프록시', allow: 'fullscreen; autoplay; encrypted-media; picture-in-picture' }));
+  app.replaceChildren(el('iframe', { class: 'proxy-frame', src: '/apps/proxy/', title: '프록시', allow: 'fullscreen; autoplay; encrypted-media; picture-in-picture' }));
 }
 
 function renderLauncher() {
@@ -805,7 +802,7 @@ function route() {
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
 
   // 프록시: 화면(public/apps/proxy/)을 이 페이지 안에 띄운다. 그래서 방문 기록에는 /#/proxy 만 남는다.
-  if (parts[0] === 'proxy') return renderProxy(token, new URLSearchParams(query).get('full') || '');
+  if (parts[0] === 'proxy') return renderProxy(token);
 
   // 유튜브를 처음 쓸 때는 이동 단축키부터 정해야 한다 (키보드가 없는 휴대폰은 빼고)
   // 관리자가 유튜브 앱을 안 보이게 했으면
