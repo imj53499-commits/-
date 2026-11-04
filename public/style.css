@@ -62,7 +62,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .icon-btn[hidden] { display: none; }
 .logo { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 19px; letter-spacing: -0.5px; }
 .logo-mark { width: 30px; height: 22px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
-.logo-mark svg { width: 16px; height: 16px; fill: #fff; stroke: none; }
+.logo-mark svg { width: 18px; height: 18px; fill: #fff; stroke: none; }
 
 .search { flex: 1; max-width: 640px; display: flex; }
 .search-box { position: relative; flex: 1; }
@@ -305,8 +305,9 @@ body.auth-mode .content { padding: 0; }
   background: linear-gradient(135deg, #34d399, #10b981 55%, #0ea5e9); box-shadow: 0 8px 24px rgba(16, 185, 129, .35);
 }
 .auth-logo::after {
-  content: ''; position: absolute; left: 22px; top: 17px; border-style: solid; border-width: 11px 0 11px 17px;
-  border-color: transparent transparent transparent #fff;
+  /* 흰색 펼친 책 */
+  content: ''; position: absolute; inset: 13px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff'%3E%3Cpath d='M3 5.5c2.6-.9 5.4-.8 8 .7v13c-2.6-1.5-5.4-1.6-8-.7zM21 5.5c-2.6-.9-5.4-.8-8 .7v13c2.6-1.5 5.4-1.6 8-.7z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .auth-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
 .auth-subtitle { margin: 6px 0 0; color: var(--text-sub); font-size: 14px; }

@@ -993,7 +993,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     }
   });
 
-  app.replaceChildren(authCard('School YouTube', signup ? '가입 신청을 하면 관리자가 확인해요' : '다시 오신 걸 환영해요',
+  app.replaceChildren(authCard('School', signup ? '가입 신청을 하면 관리자가 확인해요' : '다시 오신 걸 환영해요',
     el('div', { class: `auth-tabs${signup ? ' signup' : ''}` }, tab('login', '로그인'), tab('signup', '가입하기')),
     form));
   (signup ? realName : (prefill ? password : username)).focus();
