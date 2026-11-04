@@ -1796,8 +1796,17 @@ function showDecoy() {
       el('button', { type: 'button', text: "I'm Feeling Lucky", onclick: submit }))));
 }
 
+// 전체 화면이면 가린 화면이 영상 뒤에 깔려서 안 보이므로 먼저 전체 화면을 끈다
+function leaveFullscreen() {
+  try {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if (document.webkitFullscreenElement) document.webkitExitFullscreen();
+  } catch {}
+}
+
 function toggleCover() {
   if (cover.hidden) {
+    leaveFullscreen();
     resumeAfterCover = playerState === 1;
     playerCommand('pauseVideo');
     closePopup();
@@ -1843,6 +1852,7 @@ function jumpAway() {
   if (!jump) return;
   saveWatching(true);
   closePopup();
+  leaveFullscreen();
   document.documentElement.style.visibility = 'hidden';
   document.querySelectorAll('iframe').forEach((f) => f.remove());
   location.replace(jump.url); // 뒤로 가기로 돌아오지 않게
