@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleRequest } from '../src/server.js';
+import { FIRST_NOTICE } from '../src/notice.js';
 
 function fakeKV() {
   const store = new Map();
@@ -39,9 +40,9 @@ async function call(cookie, path, body) {
   return { status: res.status, body: await res.json() };
 }
 
-test('공지가 없으면 null, 관리자가 게시하면 로그인한 사람에게 보인다', async () => {
+test('아직 게시한 적이 없으면 첫 패치노트, 관리자가 게시하면 그게 보인다', async () => {
   const a = await userCookie('minsu');
-  assert.deepEqual((await call(a, '/api/notice')).body, { notice: null });
+  assert.deepEqual((await call(a, '/api/notice')).body, { notice: FIRST_NOTICE });
   const admin = await adminCookie();
   const posted = await call(admin, '/api/admin/notice', { title: '패치노트', body: '- 첫째\r\n- 둘째' });
   assert.equal(posted.status, 200);
@@ -54,7 +55,16 @@ test('공지가 없으면 null, 관리자가 게시하면 로그인한 사람에
   const again = await call(admin, '/api/admin/notice', { title: '패치노트', body: '- 셋째' });
   assert.notEqual(again.body.notice.id, notice.id);
 
-  // 내리기
+  // 내리기 (첫 패치노트도 다시 안 뜬다)
+  await call(admin, '/api/admin/notice', { clear: true });
+  assert.deepEqual((await call(a, '/api/notice')).body, { notice: null });
+  assert.deepEqual((await call(admin, '/api/admin/notice')).body, { notice: null });
+});
+
+test('첫 패치노트도 내릴 수 있다', async () => {
+  const a = await userCookie('minsu');
+  const admin = await adminCookie();
+  assert.equal((await call(admin, '/api/admin/notice')).body.notice.id, FIRST_NOTICE.id);
   await call(admin, '/api/admin/notice', { clear: true });
   assert.deepEqual((await call(a, '/api/notice')).body, { notice: null });
 });
