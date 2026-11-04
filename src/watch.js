@@ -3,7 +3,8 @@
 //   watch_rooms   방: 방장, 지금 영상, 재생 중인지, 위치(pos 초, at 시각 기준)
 //   watch_members 방에 들어온 사람 (seen: 마지막으로 방 상태를 확인한 시각)
 //   watch_invites 초대 (2분 지나면 사라짐)
-import { json, onlineUsers } from './auth.js';
+import { json } from './auth.js';
+import { ensureFriendTable, listFriends, areFriends, incomingRequests, withOnline } from './friends.js';
 
 const fail = (error, status, code) => json({ error, code }, status);
 
@@ -79,10 +80,9 @@ async function touchMember(db, roomId, user, now, force = false) {
   }
 }
 
-// 초대할 수 있는 친구: 지금 사용 중인 사람 (나 빼고)
+// 초대할 수 있는 사람: 내 친구 (접속 중인 친구 먼저)
 async function friends(env, session) {
-  const mine = session.username.toLowerCase();
-  return json((await onlineUsers(env)).filter((u) => u.username.toLowerCase() !== mine).map((u) => ({ username: u.username, name: u.name })));
+  return json(await withOnline(env, await listFriends(env.D1, session.username.toLowerCase())));
 }
 
 // 초대하기: 내 방이 없으면 만들고(지금 보는 영상·위치로), 고른 친구들에게 초대를 보낸다
@@ -94,6 +94,9 @@ async function invite(request, env, session) {
   const host = me(session);
   if (!to.length || to.includes(host.id)) return fail('초대할 친구를 골라 주세요.', 400);
   const db = env.D1;
+  for (const user of to) {
+    if (!(await areFriends(db, host.id, user))) return fail('친구에게만 초대할 수 있어요.', 403, 'NOT_FRIEND');
+  }
   const now = Date.now();
   if (Math.random() < 0.1) await cleanup(db, now);
 
@@ -120,7 +123,10 @@ async function inbox(env, session) {
   const { results } = await env.D1.prepare(
     'SELECT id, room, from_name, title, created FROM watch_invites WHERE to_user = ? AND status = ? AND created > ? ORDER BY created DESC LIMIT 5'
   ).bind(session.username.toLowerCase(), 'pending', now - INVITE_TTL).all();
-  return json(results.map((r) => ({ id: r.id, room: r.room, from: r.from_name, title: r.title, created: r.created })));
+  return json({
+    invites: results.map((r) => ({ id: r.id, room: r.room, from: r.from_name, title: r.title, created: r.created })),
+    requests: await incomingRequests(env.D1, session.username.toLowerCase())
+  });
 }
 
 async function answer(request, env, session) {
@@ -206,6 +212,7 @@ export async function handleWatch(request, env, session) {
   if (!env.D1) return fail('같이 보기는 아직 설정되지 않았어요. (관리자: D1 데이터베이스 연결 필요)', 503, 'NO_WATCH_DB');
   if (session.role !== 'user') return fail('관리자 계정으로는 같이 보기를 할 수 없어요.', 403, 'NOT_USER');
   await ensureTables(env.D1);
+  await ensureFriendTable(env.D1);
   const url = new URL(request.url);
   const route = `${request.method} ${url.pathname}`;
   if (route === 'GET /api/watch/friends') return friends(env, session);

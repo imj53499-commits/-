@@ -178,6 +178,7 @@ function videoGrid(items, className = 'grid') {
 // 앱을 더 넣을 때는 여기에 하나씩 추가한다.
 const APPS = [
   { id: 'proxy', name: '프록시', href: '#/proxy', color: 'linear-gradient(135deg, #818cf8, #6366f1 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 6h-2.9a15.7 15.7 0 0 0-1.4-3.6A8 8 0 0 1 18.9 8zM12 4c.8 1.2 1.5 2.5 1.9 4h-3.8c.4-1.5 1.1-2.8 1.9-4zM4.3 14a8.2 8.2 0 0 1 0-4h3.4a16.5 16.5 0 0 0 0 4zm.8 2h2.9c.3 1.3.8 2.5 1.4 3.6A8 8 0 0 1 5.1 16zM8 8H5.1a8 8 0 0 1 4.3-3.6C8.8 5.5 8.3 6.7 8 8zm4 12c-.8-1.2-1.5-2.5-1.9-4h3.8c-.4 1.5-1.1 2.8-1.9 4zm2.3-6H9.7a14.7 14.7 0 0 1 0-4h4.6a14.7 14.7 0 0 1 0 4zm.3 5.6c.6-1.1 1.1-2.3 1.4-3.6h2.9a8 8 0 0 1-4.3 3.6zm1.7-5.6a16.5 16.5 0 0 0 0-4h3.4a8.2 8.2 0 0 1 0 4z"/></svg>' },
+  { id: 'friends', name: '친구', href: '#/friends', color: 'linear-gradient(135deg, #fbbf24, #f59e0b 55%, #ef4444)', icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 19.5c.6-3.6 3.3-5.5 6.5-5.5s5.9 1.9 6.5 5.5z"/><circle cx="17" cy="9" r="2.8"/><path d="M15.5 13.6c3.2-.4 5.6 1.4 6 5.9h-4.2c-.2-2.4-.8-4.3-1.8-5.9z"/></svg>' },
   { id: 'youtube', name: 'School YouTube', href: '#/youtube', color: 'linear-gradient(135deg, #34d399, #10b981 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z"/></svg>' }
 ];
 
@@ -821,6 +822,8 @@ function route() {
   if (needsJumpSetup()) return renderJumpSetup(token, location.hash && location.hash !== '#' ? location.hash : '#/');
 
   maybeShowNotice();
+
+  if (parts[0] === 'friends') return renderFriends(token);
 
   // 프록시: 화면(public/apps/proxy/)을 이 페이지 안에 띄운다. 그래서 방문 기록에는 /#/proxy 만 남는다.
   if (parts[0] === 'proxy') return renderProxy(token);
@@ -1630,6 +1633,7 @@ topLogoutBtn.addEventListener('click', () => {
 });
 document.getElementById('passwordLink').addEventListener('click', () => settingsDialog.close());
 document.getElementById('contactLink').addEventListener('click', () => settingsDialog.close());
+document.getElementById('friendsLink').addEventListener('click', () => settingsDialog.close());
 
 document.getElementById('adminLink').addEventListener('click', () => settingsDialog.close());
 
@@ -2074,7 +2078,7 @@ async function openInviteDialog(id, title) {
   const status = el('p', { class: 'auth-message', role: 'alert' });
   const send = el('button', { type: 'button', class: 'primary', text: '초대 보내기' });
   dialog.append(el('h2', { text: '같이 보기' }),
-    el('p', { class: 'admin-empty', text: '지금 사이트를 쓰고 있는 친구에게 초대를 보내요. 수락하면 이 영상을 같은 시간으로 같이 봐요.' }),
+    el('p', { class: 'admin-empty', text: '친구에게 초대를 보내요. 수락하면 이 영상을 같은 시간으로 같이 봐요. 초록 점이 있는 친구가 지금 접속 중이에요.' }),
     list, status,
     el('div', { class: 'notice-actions' }, el('button', { type: 'button', text: '닫기', onclick: () => dialog.close() }), send));
   dialog.addEventListener('close', () => dialog.remove());
@@ -2082,10 +2086,12 @@ async function openInviteDialog(id, title) {
   dialog.showModal();
   try {
     const friends = await api('/api/watch/friends');
-    list.replaceChildren(...(friends.length ? friends.map((f) => el('label', {},
+    list.replaceChildren(...(friends.length ? friends.map((f) => el('label', { class: f.online ? '' : 'offline' },
       el('input', { type: 'checkbox', value: f.username }),
-      el('span', { text: `${f.name || f.username} (${f.username})` })))
-      : [el('p', { class: 'admin-empty', text: '지금 사이트를 쓰는 친구가 없어요.' })]));
+      f.online ? el('span', { class: 'online-dot' }) : null,
+      el('span', { text: `${f.name || f.username} (${f.username})${f.online ? '' : ' · 접속 안 함'}` })))
+      : [el('p', { class: 'admin-empty' }, '아직 친구가 없어요. ',
+        el('a', { href: '#/friends', text: '친구 추가하러 가기', onclick: () => dialog.close() }))]));
   } catch (err) {
     list.replaceChildren(el('p', { class: 'admin-empty', text: err.message }));
     send.disabled = true;
@@ -2112,7 +2118,9 @@ async function openInviteDialog(id, title) {
 async function checkInvites() {
   if (!me || me.role !== 'user' || document.hidden || maintenance) return;
   let invites;
-  try { invites = await api('/api/watch/inbox'); } catch { return; }
+  let requests;
+  try { ({ invites, requests } = await api('/api/watch/inbox')); } catch { return; }
+  for (const req of requests) showFriendRequest(req);
   for (const inv of invites) {
     if (shownInvites.has(inv.id)) continue;
     shownInvites.add(inv.id);
@@ -2140,6 +2148,104 @@ async function checkInvites() {
     setTimeout(() => card.remove(), Math.max(5000, 2 * 60 * 1000 - (Date.now() + serverOffset - inv.created)));
   }
 }
+// 친구 신청 알림 (수락 / 거절). 친구 화면을 보고 있으면 거기서 하니까 안 띄운다.
+function showFriendRequest(req) {
+  const key = `friend:${req.username}:${req.created}`;
+  if (shownInvites.has(key) || location.hash === '#/friends') return;
+  shownInvites.add(key);
+  const card = el('div', { class: 'invite-card', role: 'alert' });
+  const respond = async (accept) => {
+    card.remove();
+    try {
+      await api('/api/friends/respond', { method: 'POST', body: { username: req.username, accept } });
+      if (accept) showToast(`${req.name}님과 친구가 됐어요.`);
+      if (location.hash === '#/friends') route();
+    } catch (err) {
+      showToast(err.message);
+    }
+  };
+  card.append(
+    el('strong', { text: `${req.name}님이 친구 신청을 했어요` }),
+    el('span', { text: `아이디 ${req.username}` }),
+    el('div', {},
+      el('button', { type: 'button', text: '거절', onclick: () => respond(false) }),
+      el('button', { type: 'button', class: 'primary', text: '수락', onclick: () => respond(true) })));
+  inviteStack.append(card);
+  setTimeout(() => card.remove(), 60 * 1000);
+}
+
+// 친구 화면: 아이디로 친구 신청, 받은 신청 수락·거절, 친구 끊기, 보낸 신청 취소
+async function renderFriends(token) {
+  setTitle();
+  setActiveNav('');
+  document.body.classList.add('app-mode');
+  appTitle.textContent = '친구';
+  const body = el('div', { class: 'friends-body' }, el('p', { class: 'message', text: '불러오는 중…' }));
+  const input = el('input', { type: 'text', maxlength: '20', placeholder: '친구 아이디', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '친구 아이디' });
+  const msg = el('p', { class: 'auth-message', role: 'alert' });
+  const form = el('form', { class: 'friend-add' }, input, el('button', { type: 'submit', class: 'primary', text: '친구 신청' }));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg.className = 'auth-message';
+    msg.textContent = '';
+    if (!input.value.trim()) return void (msg.textContent = '친구 아이디를 적어 주세요.');
+    try {
+      const res = await api('/api/friends/request', { method: 'POST', body: { username: input.value.trim() } });
+      msg.className = 'auth-message ok';
+      msg.textContent = res.status === 'accepted' ? `${res.name}님과 친구가 됐어요.` : `${res.name}님에게 친구 신청을 보냈어요. 수락하면 친구가 돼요.`;
+      input.value = '';
+      load();
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  });
+  app.replaceChildren(el('div', { class: 'friends' },
+    el('h1', { text: '친구' }),
+    el('p', { class: 'admin-empty', text: '친구가 되면 영상 화면의 \'같이 보기\'로 초대할 수 있어요. 친구 아이디는 친구에게 물어보세요.' }),
+    el('section', { class: 'admin-section' }, el('h2', { text: '친구 추가' }), form, msg),
+    body));
+  input.focus();
+
+  async function act(path, payload, confirmText) {
+    if (confirmText && !confirm(confirmText)) return;
+    try {
+      await api(path, { method: 'POST', body: payload });
+    } catch (err) {
+      showToast(err.message);
+    }
+    load();
+  }
+
+  async function load() {
+    let data;
+    try {
+      data = await api('/api/friends');
+    } catch (err) {
+      if (token === renderToken) body.replaceChildren(errorView(err.message, () => route()));
+      return;
+    }
+    if (token !== renderToken) return;
+    const row = (person, ...buttons) => el('li', { class: 'admin-row' },
+      el('div', { class: 'admin-user' },
+        el('strong', {}, person.online ? el('span', { class: 'online-dot' }) : null, person.name || person.username),
+        el('span', { text: `아이디 ${person.username}${person.online === undefined ? '' : person.online ? ' · 접속 중' : ''}` })),
+      el('div', { class: 'admin-actions' }, ...buttons));
+    const section = (title, items, empty) => el('section', { class: 'admin-section' },
+      el('h2', { text: `${title} ${items.length}` }),
+      items.length ? el('ul', { class: 'admin-list' }, ...items) : el('p', { class: 'admin-empty', text: empty }));
+    body.replaceChildren(
+      data.incoming.length ? section('받은 친구 신청', data.incoming.map((p) => row(p,
+        el('button', { class: 'approve', text: '수락', onclick: () => act('/api/friends/respond', { username: p.username, accept: true }) }),
+        el('button', { text: '거절', onclick: () => act('/api/friends/respond', { username: p.username, accept: false }) }))), '') : '',
+      section('내 친구', data.friends.map((p) => row(p,
+        el('button', { class: 'danger', text: '친구 끊기', onclick: () => act('/api/friends/remove', { username: p.username }, `${p.name}님과 친구를 끊을까요?`) }))),
+      '아직 친구가 없어요. 위에서 친구 아이디로 신청해 보세요.'),
+      data.outgoing.length ? section('보낸 친구 신청', data.outgoing.map((p) => row(p,
+        el('button', { text: '취소', onclick: () => act('/api/friends/remove', { username: p.username }) }))), '') : '');
+  }
+  load();
+}
+
 setInterval(checkInvites, INVITE_POLL_MS);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkInvites(); });
 

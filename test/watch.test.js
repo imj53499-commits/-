@@ -47,28 +47,72 @@ async function call(cookie, path, body) {
   return { status: res.status, body: await res.json() };
 }
 
+async function makeFriends(x, y, yName) {
+  await call(x, '/api/friends/request', { username: yName });
+  const req = (await call(y, '/api/friends')).body.incoming[0];
+  await call(y, '/api/friends/respond', { username: req.username, accept: true });
+}
+
+test('친구 신청 → 알림 → 수락하면 서로 친구, 끊기·취소·거절', async () => {
+  const a = await userCookie('minsu', '김민수');
+  const b = await userCookie('jisu', '이지수');
+  const c = await userCookie('cheolsu', '박철수');
+  assert.equal((await call(a, '/api/friends/request', { username: 'nobody' })).body.code, 'NO_USER');
+  assert.equal((await call(a, '/api/friends/request', { username: 'minsu' })).status, 400);
+  assert.equal((await call(a, '/api/friends/request', { username: 'JISU' })).body.status, 'pending');
+  assert.equal((await call(a, '/api/friends/request', { username: 'jisu' })).body.code, 'ALREADY');
+
+  // 지수: 같이 보기 알림 확인 때 친구 신청도 같이 온다
+  const inbox = (await call(b, '/api/watch/inbox')).body;
+  assert.deepEqual(inbox.requests.map((r) => [r.username, r.name]), [['minsu', '김민수']]);
+  assert.deepEqual((await call(a, '/api/friends')).body.outgoing.map((r) => r.name), ['이지수']);
+  await call(b, '/api/friends/respond', { username: 'minsu', accept: true });
+  const mine = (await call(a, '/api/friends')).body;
+  assert.deepEqual(mine.friends.map((f) => [f.username, f.name]), [['jisu', '이지수']]);
+  assert.deepEqual(mine.outgoing, []);
+  assert.deepEqual((await call(b, '/api/friends')).body.friends.map((f) => f.username), ['minsu']);
+  assert.equal((await call(b, '/api/friends/request', { username: 'minsu' })).body.code, 'ALREADY');
+
+  // 서로 신청하면 바로 친구
+  await call(c, '/api/friends/request', { username: 'minsu' });
+  assert.equal((await call(a, '/api/friends/request', { username: 'cheolsu' })).body.status, 'accepted');
+  assert.equal((await call(a, '/api/friends')).body.friends.length, 2);
+
+  // 끊기
+  await call(b, '/api/friends/remove', { username: 'minsu' });
+  assert.deepEqual((await call(a, '/api/friends')).body.friends.map((f) => f.username), ['cheolsu']);
+  // 거절
+  await call(a, '/api/friends/request', { username: 'jisu' });
+  await call(b, '/api/friends/respond', { username: 'minsu', accept: false });
+  assert.deepEqual((await call(b, '/api/friends')).body.incoming, []);
+  assert.equal((await call(b, '/api/friends/respond', { username: 'minsu', accept: true })).body.code, 'NO_REQUEST');
+});
+
 test('초대 → 알림 → 수락 → 방장 재생 상태를 같이 본다 → 방장이 나가면 끝', async () => {
   const a = await userCookie('minsu', '김민수');
   const b = await userCookie('jisu', '이지수');
+  // 친구가 아니면 초대 못 함
+  assert.equal((await call(a, '/api/watch/invite', { to: ['jisu'], video: 'aaaaaaaaaaa', pos: 0 })).body.code, 'NOT_FRIEND');
+  await makeFriends(a, b, 'jisu');
   await call(b, '/api/watch/inbox'); // 지수도 지금 사용 중
 
   const friends = await call(a, '/api/watch/friends');
-  assert.deepEqual(friends.body.map((f) => f.username), ['jisu']);
+  assert.deepEqual(friends.body.map((f) => [f.username, f.online]), [['jisu', true]]);
 
   const room = await call(a, '/api/watch/invite', { to: ['jisu'], video: 'aaaaaaaaaaa', title: '영상', pos: 30, playing: true });
   assert.equal(room.status, 200);
   assert.equal(room.body.host, 'minsu');
 
-  const inbox = await call(b, '/api/watch/inbox');
-  assert.equal(inbox.body.length, 1);
-  assert.equal(inbox.body[0].from, '김민수');
-  assert.equal(inbox.body[0].title, '영상');
+  const inbox = (await call(b, '/api/watch/inbox')).body.invites;
+  assert.equal(inbox.length, 1);
+  assert.equal(inbox[0].from, '김민수');
+  assert.equal(inbox[0].title, '영상');
 
-  const joined = await call(b, '/api/watch/answer', { id: inbox.body[0].id, accept: true });
+  const joined = await call(b, '/api/watch/answer', { id: inbox[0].id, accept: true });
   assert.equal(joined.body.video, 'aaaaaaaaaaa');
   assert.equal(joined.body.playing, true);
   assert.deepEqual(joined.body.members.map((m) => m.name).sort(), ['김민수', '이지수']);
-  assert.equal((await call(b, '/api/watch/inbox')).body.length, 0);
+  assert.equal((await call(b, '/api/watch/inbox')).body.invites.length, 0);
 
   // 방장이 멈추고 다른 영상으로
   assert.equal((await call(a, '/api/watch/state', { id: room.body.id, video: 'bbbbbbbbbbb', title: '다음', pos: 0, playing: false })).status, 200);
@@ -85,8 +129,9 @@ test('거절하면 방에 안 들어가고, 초대받지 않은 사람은 방을
   const a = await userCookie('minsu', '김민수');
   const b = await userCookie('jisu', '이지수');
   const c = await userCookie('cheolsu', '박철수');
+  await makeFriends(a, b, 'jisu');
   const room = await call(a, '/api/watch/invite', { to: ['jisu'], video: 'aaaaaaaaaaa', pos: 0 });
-  const inv = (await call(b, '/api/watch/inbox')).body[0];
+  const inv = (await call(b, '/api/watch/inbox')).body.invites[0];
   await call(b, '/api/watch/answer', { id: inv.id, accept: false });
   assert.equal((await call(b, `/api/watch/room?id=${room.body.id}`)).body.code, 'NOT_MEMBER');
   assert.equal((await call(c, `/api/watch/room?id=${room.body.id}`)).body.code, 'NOT_MEMBER');

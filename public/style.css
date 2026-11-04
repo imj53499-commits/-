@@ -695,3 +695,12 @@ body.app-mode .content, body.app-mode.sidebar-collapsed .content { padding-left:
 @media (max-width: 800px) {
   .together-bar { bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom) + 10px); left: 10px; }
 }
+
+/* 친구 */
+.friends { max-width: 640px; margin: 0 auto; padding: 16px 0 40px; }
+.friends h1 { margin: 0 0 6px; font-size: 22px; }
+.friend-add { display: flex; gap: 8px; margin-bottom: 8px; }
+.friend-add input { flex: 1; min-width: 0; height: 42px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: inherit; font-size: 15px; }
+.friend-add button { padding: 0 16px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
+.friends .admin-user strong { display: flex; align-items: center; }
+.invite-friends label.offline { opacity: .6; }

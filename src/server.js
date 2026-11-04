@@ -4,6 +4,7 @@ import { tokenResponse } from './proxy.js';
 import { handleApps, loadAccess, canUseApp } from './apps.js';
 import { handleNotice } from './notice.js';
 import { handleWatch } from './watch.js';
+import { handleFriends } from './friends.js';
 import { loadMaintenance, maintenanceResponse, handleMaintenanceAdmin } from './maintenance.js';
 
 // /api/* 요청의 입구. 계정 관련 요청은 auth 로, 나머지(영상 API)는 승인된 사용자만 쓸 수 있다.
@@ -56,5 +57,6 @@ export async function handleRequest(request, env, yt) {
   }
   // 같이 보기 (유튜브를 볼 수 있는 사람만)
   if (url.pathname.startsWith('/api/watch/')) return handleWatch(request, env, session);
+  if (url.pathname === '/api/friends' || url.pathname.startsWith('/api/friends/')) return handleFriends(request, env, session);
   return handleApi(url, yt);
 }
