@@ -704,3 +704,6 @@ body.app-mode .content, body.app-mode.sidebar-collapsed .content { padding-left:
 .friend-add button { padding: 0 16px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; }
 .friends .admin-user strong { display: flex; align-items: center; }
 .invite-friends label.offline { opacity: .6; }
+
+/* 휴대폰·태블릿: 단축키(이동·팝업 닫기) 설정 칸 숨김 */
+body.touch-device .shortcut-section { display: none; }

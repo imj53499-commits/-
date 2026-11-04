@@ -818,7 +818,10 @@ function route() {
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
 
   // 로그인하면 맨 먼저(앱 목록보다 먼저) 이동 단축키부터 정해야 한다 (키보드가 없는 휴대폰은 빼고)
-  if (parts[0] === 'jump-setup') return renderJumpSetup(token, '#/');
+  if (parts[0] === 'jump-setup') {
+    if (touchOnly) return void location.replace('#/');
+    return renderJumpSetup(token, '#/');
+  }
   if (needsJumpSetup()) return renderJumpSetup(token, location.hash && location.hash !== '#' ? location.hash : '#/');
 
   maybeShowNotice();
@@ -2316,8 +2319,12 @@ document.getElementById('exitBtn').addEventListener('click', quickExit);
 
 // ---------- 이동 단축키: 정한 키를 누르면 정한 사이트로 바로 이동 ----------
 
-const touchOnly = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+// 휴대폰·태블릿은 이동 단축키를 안 쓴다 (정하는 화면도 안 뜸). 펜을 쓰는 폰은 마우스가 있는 것처럼
+// 보일 때가 있어서 브라우저 이름(Android·iPhone·Mobile)으로도 확인한다. 크롬북은 여기 안 걸린다.
+const touchOnly = window.matchMedia('(hover: none) and (pointer: coarse)').matches
+  || /Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
 let jump = loadJump();
+if (touchOnly) document.body.classList.add('touch-device'); // 설정 창의 단축키 칸도 숨김
 let pickingJumpKey = false; // 이동 단축키를 고르는 중에는 다른 단축키가 동작하지 않게
 
 function needsJumpSetup() {
@@ -2325,7 +2332,7 @@ function needsJumpSetup() {
 }
 
 function jumpAway() {
-  if (!jump) return;
+  if (!jump || touchOnly) return;
   saveWatching(true);
   // 프록시로 보던 중이면 돌아왔을 때 그 사이트를 다시 연다 (public/apps/proxy/ 가 읽음)
   if (document.querySelector('.proxy-frame')) {
@@ -2460,7 +2467,7 @@ function renderJumpSetup(token, next) {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (!jump || recordingFor || pickingJumpKey || !matchesShortcut(e, jump.shortcut)) return;
+  if (touchOnly || !jump || recordingFor || pickingJumpKey || !matchesShortcut(e, jump.shortcut)) return;
   if (isTypingKey(jump.shortcut) && isTypingTarget(e.target)) return;
   e.preventDefault();
   jumpAway();
