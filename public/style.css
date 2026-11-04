@@ -644,3 +644,16 @@ body.app-mode .content, body.app-mode.sidebar-collapsed .content { padding-left:
 
 /* 프록시: 위쪽 바 아래를 화면(public/apps/proxy/)으로 꽉 채운다 */
 .proxy-frame { position: fixed; top: var(--topbar-h); left: 0; right: 0; bottom: 0; width: 100%; height: calc(100% - var(--topbar-h)); border: 0; background: var(--bg); }
+
+/* 공지·패치노트 팝업 */
+.notice { width: min(440px, calc(100vw - 32px)); max-height: min(80vh, 640px); padding: 22px; border: 0; border-radius: 18px; background: var(--bg); color: var(--text); box-shadow: 0 16px 48px rgba(0, 0, 0, .3); }
+.notice::backdrop { background: rgba(0, 0, 0, .45); }
+.notice[open] { display: flex; flex-direction: column; gap: 14px; }
+.notice h2 { margin: 0; font-size: 19px; }
+.notice-body { white-space: pre-line; line-height: 1.6; font-size: 14px; overflow-y: auto; }
+.notice-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.notice-actions button { padding: 9px 14px; border-radius: 10px; border: 0; background: var(--bg-soft); color: inherit; font-weight: 600; font-size: 13px; cursor: pointer; }
+.notice-actions .primary { background: var(--accent); color: #fff; }
+.notice-editor { display: flex; flex-direction: column; gap: 8px; }
+.notice-editor input, .notice-editor textarea { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: inherit; font: inherit; font-size: 14px; }
+.notice-editor textarea { resize: vertical; line-height: 1.5; }

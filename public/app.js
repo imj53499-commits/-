@@ -809,6 +809,8 @@ function route() {
   if (parts[0] === 'jump-setup') return renderJumpSetup(token, '#/');
   if (needsJumpSetup()) return renderJumpSetup(token, location.hash && location.hash !== '#' ? location.hash : '#/');
 
+  maybeShowNotice();
+
   // 프록시: 화면(public/apps/proxy/)을 이 페이지 안에 띄운다. 그래서 방문 기록에는 /#/proxy 만 남는다.
   if (parts[0] === 'proxy') return renderProxy(token);
 
@@ -1221,6 +1223,15 @@ function renderPassword(token, forced) {
 
 const STATUS_LABELS = { pending: '승인 대기', approved: '승인됨', rejected: '거절됨', blocked: '차단됨' };
 
+// 관리자 화면에서 공지를 처음 쓸 때 채워 두는 내용 (고쳐서 게시하면 됨)
+const DEFAULT_NOTICE_BODY = [
+  '- 맨 위 로고가 School 로 바뀌었고, 누르면 처음 화면(앱 목록)으로 가요',
+  '- 같은 계정은 한 기기에서만 로그인돼요. 다른 기기에서 로그인하면 먼저 쓰던 기기는 로그아웃돼요',
+  '- 전체 화면으로 보다가 이동 단축키를 눌러도 바로 이동해요',
+  '- 팝업 플레이어가 다른 창을 눌러도 위에 떠 있어요 (크롬·엣지)',
+  '- 관리자에게 문의는 1시간에 20개까지 보낼 수 있어요'
+].join('\n');
+
 async function renderAdmin(token) {
   setTitle('가입 승인 관리');
   setActiveNav('');
@@ -1259,8 +1270,11 @@ async function renderAdmin(token) {
   let users;
   let messages;
   let access;
+  let notice;
   try {
-    [users, messages, access] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages'), api('/api/admin/apps')]);
+    let noticeRes;
+    [users, messages, access, noticeRes] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages'), api('/api/admin/apps'), api('/api/admin/notice')]);
+    notice = noticeRes.notice;
   } catch (err) {
     if (token !== renderToken) return;
     if (err.code === 'ADMIN_REQUIRED') { me = null; return route(); }
@@ -1405,10 +1419,40 @@ async function renderAdmin(token) {
           ? el('ul', { class: 'admin-list' }, ...list.map(userRow))
           : el('p', { class: 'admin-empty', text: status === 'pending' ? '기다리는 사람이 없어요.' : '없음' }));
     });
-    body.replaceChildren(inbox, appAccessSection(), ...sections);
+    body.replaceChildren(inbox, noticeSection(), appAccessSection(), ...sections);
   }
 
   // 앱 보이기: 앱마다 모두 / 선택한 사람만 / 아무도 안 보임 (관리자는 언제나 다 보임)
+  // 공지·패치노트 쓰기: 저장하면 로그인한 사람들에게 들어올 때 팝업으로 뜬다
+  function noticeSection() {
+    const title = el('input', { type: 'text', maxlength: '60', placeholder: '제목 (예: 패치노트)', 'aria-label': '공지 제목' });
+    const text = el('textarea', { rows: '8', maxlength: '4000', placeholder: '내용 (줄바꿈 그대로 보여요)', 'aria-label': '공지 내용' });
+    title.value = notice?.title || '패치노트';
+    text.value = notice?.body || DEFAULT_NOTICE_BODY;
+    const status = el('span', { class: 'app-access-status', role: 'status',
+      text: notice ? `게시 중 · ${new Date(notice.updatedAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}` : '아직 게시 안 함' });
+    const send = async (payload, done) => {
+      status.textContent = '';
+      try {
+        notice = (await api('/api/admin/notice', { method: 'POST', body: payload })).notice;
+        status.textContent = done;
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    };
+    return el('section', { class: 'admin-section' },
+      el('h2', { text: '공지·패치노트' }),
+      el('p', { class: 'admin-empty', text: '게시하면 사람들이 들어올 때 팝업으로 떠요. 고쳐서 다시 게시하면 \'다시 보지 않기\' 한 사람에게도 다시 떠요.' }),
+      el('div', { class: 'notice-editor' },
+        title, text,
+        el('div', { class: 'app-access-head' },
+          el('button', { type: 'button', class: 'approve', text: '게시하기', onclick: () => send({ title: title.value, body: text.value }, '게시했어요') }),
+          el('button', { type: 'button', text: '내리기', onclick: () => {
+            if (confirm('공지를 내릴까요? 더 이상 팝업이 안 떠요.')) send({ clear: true }, '내렸어요');
+          } }),
+          status)));
+  }
+
   function appAccessSection() {
     const approved = users.filter((u) => u.status === 'approved');
     const rows = APPS.filter((a) => !a.off).map((a) => {
@@ -1483,6 +1527,52 @@ document.getElementById('passwordLink').addEventListener('click', () => settings
 document.getElementById('contactLink').addEventListener('click', () => settingsDialog.close());
 
 document.getElementById('adminLink').addEventListener('click', () => settingsDialog.close());
+
+// ---------- 공지·패치노트 팝업 (관리자 화면에서 씀) ----------
+// 들어올 때 한 번 뜬다. '오늘 하루 안 보기'는 오늘 밤 12시까지, '다시 보지 않기'는 공지를 새로 고칠 때까지 안 뜬다.
+
+const NOTICE_HIDE_KEY = 'noticeHide';
+const noticeDialog = document.getElementById('noticeDialog');
+let noticeChecked = false;
+let currentNotice = null;
+
+function noticeHidden(notice) {
+  try {
+    const hide = JSON.parse(localStorage.getItem(NOTICE_HIDE_KEY) || 'null');
+    return !!hide && hide.id === notice.id && (hide.until === 'never' || Date.now() < hide.until);
+  } catch {
+    return false;
+  }
+}
+
+function hideNotice(until) {
+  if (currentNotice) {
+    try { localStorage.setItem(NOTICE_HIDE_KEY, JSON.stringify({ id: currentNotice.id, until })); } catch {}
+  }
+  noticeDialog.close();
+}
+
+async function maybeShowNotice() {
+  if (noticeChecked || !me || me.role === 'admin') return;
+  noticeChecked = true;
+  let notice;
+  try { ({ notice } = await api('/api/notice')); } catch { return; }
+  if (!notice || noticeHidden(notice) || !me || noticeDialog.open) return;
+  currentNotice = notice;
+  document.getElementById('noticeTitle').textContent = notice.title;
+  document.getElementById('noticeBody').textContent = notice.body;
+  noticeDialog.showModal();
+  document.getElementById('noticeClose').focus();
+}
+
+document.getElementById('noticeClose').addEventListener('click', () => noticeDialog.close());
+document.getElementById('noticeToday').addEventListener('click', () => {
+  const midnight = new Date();
+  midnight.setHours(24, 0, 0, 0);
+  hideNotice(midnight.getTime());
+});
+document.getElementById('noticeNever').addEventListener('click', () => hideNotice('never'));
+noticeDialog.addEventListener('click', (e) => { if (e.target === noticeDialog) noticeDialog.close(); });
 
 async function loadMe() {
   try {

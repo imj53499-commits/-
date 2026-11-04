@@ -95,6 +95,16 @@
 
   <main id="app" class="content"></main>
 
+  <dialog id="noticeDialog" class="notice">
+    <h2 id="noticeTitle"></h2>
+    <div id="noticeBody" class="notice-body"></div>
+    <div class="notice-actions">
+      <button type="button" id="noticeNever">다시 보지 않기</button>
+      <button type="button" id="noticeToday">오늘 하루 안 보기</button>
+      <button type="button" class="primary" id="noticeClose">닫기</button>
+    </div>
+  </dialog>
+
   <dialog id="settingsDialog" class="settings">
     <div id="accountSection" class="account-section" hidden>
       <h2>계정</h2>

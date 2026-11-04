@@ -2,6 +2,7 @@ import { handleApi } from './api.js';
 import { handleAuth, getSession, blockDevice, deviceBlockResponse, json, ELSEWHERE_MESSAGE } from './auth.js';
 import { tokenResponse } from './proxy.js';
 import { handleApps, loadAccess, canUseApp } from './apps.js';
+import { handleNotice } from './notice.js';
 
 // /api/* 요청의 입구. 계정 관련 요청은 auth 로, 나머지(영상 API)는 승인된 사용자만 쓸 수 있다.
 // 로그인 없이는 아무것도 못 쓴다. KV 저장소(DB)를 연결하지 않았으면 로그인을 할 수 없으니 전부 막는다.
@@ -17,16 +18,19 @@ export async function handleRequest(request, env, yt) {
   }
   // 앱 보이기 설정 (/api/apps, /api/apps/check, 관리자용 /api/admin/apps)
   const isApps = ['/api/apps', '/api/apps/check', '/api/admin/apps'].includes(url.pathname);
-  if (isAuth && !isApps) return handleAuth(request, env);
+  // 공지·패치노트 (/api/notice, 관리자용 /api/admin/notice)
+  const isNotice = url.pathname === '/api/notice' || url.pathname === '/api/admin/notice';
+  if (isAuth && !isApps && !isNotice) return handleAuth(request, env);
   const info = {};
   const session = await getSession(request, env, info);
   if (!session) {
     if (info.blockedUser) return blockDevice(request, env, info.blockedUser);
     if (info.elsewhere) return json({ error: ELSEWHERE_MESSAGE, code: 'LOGGED_IN_ELSEWHERE' }, 401);
-    if (url.pathname === '/api/admin/apps') return json({ error: '관리자 로그인이 필요해요.', code: 'ADMIN_REQUIRED' }, 401);
+    if (url.pathname === '/api/admin/apps' || url.pathname === '/api/admin/notice') return json({ error: '관리자 로그인이 필요해요.', code: 'ADMIN_REQUIRED' }, 401);
     return json({ error: '로그인이 필요해요.', code: 'LOGIN_REQUIRED' }, 401);
   }
   if (isApps) return handleApps(request, env, session);
+  if (isNotice) return handleNotice(request, env, session);
   // 프록시 앱: 로그인한 사람에게 /p/* 주소에 쓸 표를 준다 (프록시 앱을 볼 수 없는 사람은 못 받음)
   if (url.pathname === '/api/proxy/token') {
     if (!canUseApp(await loadAccess(env), session, 'proxy')) {
