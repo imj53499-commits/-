@@ -1833,7 +1833,10 @@ window.addEventListener('message', (e) => {
   const msg = readPlayerMessage(e);
   if (!msg) return;
   if (msg.duration !== undefined) playerDuration = msg.duration;
-  if (msg.time !== undefined) playerTime = msg.time;
+  if (msg.time !== undefined) {
+    playerTime = msg.time;
+    playerTimeAt = Date.now();
+  }
   if (msg.state !== undefined) {
     const ended = msg.state === ENDED && playerState !== ENDED;
     const paused = msg.state === PAUSED && playerState !== PAUSED;
@@ -1940,7 +1943,16 @@ const INVITE_POLL_MS = 15 * 1000;
 let together = null; // { id, host, room } 같이 보는 중이면
 let togetherTimer = null;
 let serverOffset = 0; // 서버 시각 - 내 시각
+let serverSynced = false; // serverOffset 을 한 번이라도 재 봤는지
 let lastPosted = null; // 방장이 마지막으로 알린 상태 { video, pos, playing, at }
+let playerTimeAt = 0; // playerTime 을 받은 시각 (플레이어는 0.25초마다만 알려 줌)
+let rateSet = 1; // 같이 보는 사람: 조금 늦거나 빠를 때 바꿔 둔 재생 속도
+let seekCooldown = 0; // 건너뛴 직후에는 잠깐 다시 맞추지 않는다 (불러오는 중이라)
+
+// 지금 플레이어 위치 (마지막으로 받은 시각부터 흐른 시간까지 더해서)
+function livePlayerTime() {
+  return playerTime + (playerState === PLAYING && playerTimeAt ? (Date.now() - playerTimeAt) / 1000 : 0);
+}
 let postingSoon = null;
 const shownInvites = new Set();
 
@@ -1967,12 +1979,13 @@ function startTogether(id, host, room) {
   together = { id, host, room };
   saveTogether();
   clearInterval(togetherTimer);
-  togetherTimer = setInterval(syncTogether, host ? 4000 : 1500);
+  togetherTimer = setInterval(syncTogether, host ? 4000 : 1000);
   if (room) applyRoom(room);
   else syncTogether();
 }
 
 function endTogether(message) {
+  if (together && !together.host) setRate(1);
   together = null;
   lastPosted = null;
   clearInterval(togetherTimer);
@@ -1991,7 +2004,11 @@ async function leaveTogether() {
 async function syncTogether() {
   if (!together || document.hidden && together.host) return;
   try {
-    applyRoom(await api(`/api/watch/room?id=${together.id}`));
+    const sent = Date.now();
+    const room = await api(`/api/watch/room?id=${together.id}`);
+    // 서버 시각은 요청이 오가는 시간의 가운데쯤에 찍힌 것으로 본다
+    room.offset = room.serverNow - (sent + Date.now()) / 2;
+    applyRoom(room);
   } catch (err) {
     if (['NO_ROOM', 'NOT_MEMBER'].includes(err.code)) endTogether(together?.host ? '' : '방장이 같이 보기를 끝냈어요.');
   }
@@ -2004,7 +2021,12 @@ function roomExpectedPos(room) {
 function applyRoom(room) {
   if (!together) return;
   together.room = room;
-  serverOffset = room.serverNow - Date.now();
+  if (room.offset !== undefined) {
+    serverOffset = room.offset;
+    serverSynced = true;
+  } else if (!serverSynced) {
+    serverOffset = room.serverNow - Date.now();
+  }
   drawTogetherBar();
   if (together.host) return;
   // 방장이 나간 지 오래되면 끝
@@ -2015,10 +2037,34 @@ function applyRoom(room) {
     location.hash = `#/watch/${room.video}`;
     return;
   }
-  const expected = roomExpectedPos(room);
-  if (Math.abs(playerTime - expected) > 2.5) playerCommand('seekTo', [expected, true]);
   if (room.playing && playerState !== PLAYING && playerState !== 3) playerCommand('playVideo');
   if (!room.playing && playerState === PLAYING) playerCommand('pauseVideo');
+  // 위치 맞추기: 1.5초 넘게 차이 나면 바로 건너뛰고, 그보다 작으면 재생 속도를 살짝 바꿔서 따라잡는다
+  const drift = livePlayerTime() - roomExpectedPos(room); // + 면 내가 빠름
+  if (Date.now() < seekCooldown) return;
+  if (Math.abs(drift) > 1.5 || (!room.playing && Math.abs(drift) > 0.3)) {
+    playerCommand('seekTo', [roomExpectedPos(room), true]);
+    seekCooldown = Date.now() + 1500;
+    setRate(1);
+    return;
+  }
+  if (!room.playing) return setRate(1);
+  // 1.25배(또는 0.75배)는 1초에 0.25초씩 따라잡으니, 차이만큼만 딱 그 시간 동안 바꿨다가 되돌린다
+  if (Math.abs(drift) > 0.12 && rateSet === 1) {
+    setRate(drift > 0 ? 0.75 : 1.25);
+    const ms = Math.min(Math.abs(drift) / 0.25 * 1000, 6000);
+    seekCooldown = Date.now() + ms + 700; // 되돌린 뒤 위치 보고를 받을 시간
+    clearTimeout(rateTimer);
+    rateTimer = setTimeout(() => setRate(1), ms);
+  }
+}
+
+let rateTimer = null;
+
+function setRate(rate) {
+  if (rate === rateSet) return;
+  rateSet = rate;
+  playerCommand('setPlaybackRate', [rate]);
 }
 
 function drawTogetherBar() {
@@ -2038,17 +2084,18 @@ function drawTogetherBar() {
 // 방장: 영상 화면에 들어오면 (다음 영상 자동재생 포함) 같이 보는 사람들도 그 영상으로
 function togetherOnWatch(id, title) {
   if (!together?.host) return;
-  postTogether({ video: id, title, pos: playerTime > 0 ? playerTime : resumeTime(id), playing: true });
+  postTogether({ video: id, title, pos: playerTime > 0 ? livePlayerTime() : resumeTime(id), playing: true });
 }
 
 function postTogether(state) {
   if (!together?.host) return;
-  lastPosted = { ...state, at: Date.now() };
+  const capturedAt = Date.now();
+  lastPosted = { ...state, at: capturedAt };
   clearTimeout(postingSoon);
-  // 짧은 시간에 여러 번 바뀌면 마지막 것만 보낸다
+  // 짧은 시간에 여러 번 바뀌면 마지막 것만 보낸다. 잰 뒤 보내기까지 걸린 시간(age)도 같이 보내서 서버가 보정한다.
   postingSoon = setTimeout(() => {
     if (!together?.host) return;
-    api('/api/watch/state', { method: 'POST', body: { id: together.id, ...state } }).catch((err) => {
+    api('/api/watch/state', { method: 'POST', body: { id: together.id, ...state, age: Date.now() - capturedAt, serverAt: serverSynced ? capturedAt + serverOffset : 0 } }).catch((err) => {
       if (['NO_ROOM', 'NOT_HOST'].includes(err.code)) endTogether('같이 보기가 끝났어요.');
     });
   }, 300);
@@ -2060,10 +2107,11 @@ function togetherPlayerEvent(msg) {
   const playing = playerState === PLAYING;
   const expected = lastPosted.pos + (lastPosted.playing ? (Date.now() - lastPosted.at) / 1000 : 0);
   const changedState = msg.state !== undefined && (msg.state === PLAYING || msg.state === PAUSED) && playing !== lastPosted.playing;
-  const jumped = msg.time !== undefined && Math.abs(playerTime - expected) > 3;
-  const stale = playing && Date.now() - lastPosted.at > 10000;
+  const jumped = msg.time !== undefined && Math.abs(livePlayerTime() - expected) > 1;
+  // 재생 중이면 3초마다 정확한 위치를 다시 알린다 (불러오느라 멈칫한 것까지 맞추게)
+  const stale = playing && Date.now() - lastPosted.at > 3000;
   if (changedState || jumped || stale) {
-    postTogether({ video: watching.id, title: watching.meta?.title || lastPosted.title || '', pos: playerTime, playing });
+    postTogether({ video: watching.id, title: watching.meta?.title || lastPosted.title || '', pos: livePlayerTime(), playing });
   }
 }
 
@@ -2105,8 +2153,11 @@ async function openInviteDialog(id, title) {
     if (!to.length) return void (status.textContent = '초대할 친구를 골라 주세요.');
     send.disabled = true;
     try {
-      const room = await api('/api/watch/invite', { method: 'POST', body: { to, video: id, title, pos: playerTime, playing: playerState === PLAYING } });
-      lastPosted = { video: id, title, pos: playerTime, playing: playerState === PLAYING, at: Date.now() };
+      const capturedAt = Date.now();
+      const pos = livePlayerTime();
+      const playing = playerState === PLAYING;
+      const room = await api('/api/watch/invite', { method: 'POST', body: { to, video: id, title, pos, playing, age: 0 } });
+      lastPosted = { video: id, title, pos, playing, at: capturedAt };
       startTogether(room.id, true, room);
       dialog.close();
       showToast(`초대를 보냈어요. 친구가 수락하면 같이 봐요.`);

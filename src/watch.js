@@ -48,8 +48,18 @@ async function readJson(request) {
 function cleanState(body) {
   const video = String(body?.video ?? '');
   if (!VIDEO_ID.test(video)) return null;
-  const pos = Math.max(0, Math.min(Number(body?.pos) || 0, 24 * 60 * 60));
-  return { video, title: String(body?.title ?? '').slice(0, 200), playing: body?.playing ? 1 : 0, pos };
+  const playing = body?.playing ? 1 : 0;
+  // 방장이 위치를 잰 시각. serverAt(방장이 서버 시계로 계산한 시각)이 있으면 그걸 쓰고,
+  // 없으면 age(잰 뒤 보내기까지 걸린 ms)만큼 앞당긴다. 이상한 값이면 지금으로 본다.
+  const now = Date.now();
+  const serverAt = Number(body?.serverAt);
+  const at = serverAt > now - 5000 && serverAt <= now + 1000
+    ? Math.min(serverAt, now)
+    : now - Math.max(0, Math.min(Number(body?.age) || 0, 5000));
+  const raw = Math.max(0, Math.min(Number(body?.pos) || 0, 24 * 60 * 60));
+  // 저장은 '지금(now) 기준 위치'로 바꿔서 한다
+  const pos = raw + (playing ? (now - at) / 1000 : 0);
+  return { video, title: String(body?.title ?? '').slice(0, 200), playing, pos, now };
 }
 
 // 방 상태 + 지금 있는 사람들
@@ -97,18 +107,18 @@ async function invite(request, env, session) {
   for (const user of to) {
     if (!(await areFriends(db, host.id, user))) return fail('친구에게만 초대할 수 있어요.', 403, 'NOT_FRIEND');
   }
-  const now = Date.now();
+  const now = state.now;
   if (Math.random() < 0.1) await cleanup(db, now);
 
   let room = await db.prepare('SELECT * FROM watch_rooms WHERE host = ?').bind(host.id).first();
   if (!room) {
-    room = { id: randomId(), host: host.id, host_name: host.name, ...state, at: now, updated: now };
+    room = { id: randomId(), host: host.id, host_name: host.name, video: state.video, title: state.title, playing: state.playing, pos: state.pos, at: now, updated: now };
     await db.prepare('INSERT INTO watch_rooms (id, host, host_name, video, title, playing, pos, at, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .bind(room.id, room.host, room.host_name, room.video, room.title, room.playing, room.pos, now, now).run();
   } else {
     await db.prepare('UPDATE watch_rooms SET video = ?, title = ?, playing = ?, pos = ?, at = ?, updated = ? WHERE id = ?')
       .bind(state.video, state.title, state.playing, state.pos, now, now, room.id).run();
-    room = { ...room, ...state, at: now, updated: now };
+    room = { ...room, video: state.video, title: state.title, playing: state.playing, pos: state.pos, at: now, updated: now };
   }
   await touchMember(db, room.id, host, now, true);
   await db.batch(to.map((user) => db.prepare(
@@ -173,7 +183,7 @@ async function setState(request, env, session) {
   const state = cleanState(body);
   if (!ROOM_ID.test(id) || !state) return fail('잘못된 요청', 400);
   const db = env.D1;
-  const now = Date.now();
+  const now = state.now;
   const res = await db.prepare('UPDATE watch_rooms SET video = ?, title = ?, playing = ?, pos = ?, at = ?, updated = ? WHERE id = ? AND host = ?')
     .bind(state.video, state.title, state.playing, state.pos, now, now, id, session.username.toLowerCase()).run();
   if (res.meta.changes !== 1) return fail('방장만 바꿀 수 있어요.', 403, 'NOT_HOST');
