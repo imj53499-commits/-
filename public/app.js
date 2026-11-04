@@ -5,7 +5,7 @@ import {
 } from './shortcuts.js';
 import {
   embedUrl, sendToPlayer, listenTo, readPlayerMessage, autostart, loadAutoplay, saveAutoplay,
-  loadHistory, recordWatch, clearHistory, pickNext, loadPopupBounds, ENDED, PAUSED
+  loadHistory, recordWatch, clearHistory, pickNext, loadPopupBounds, ENDED, PAUSED, PLAYING
 } from './player.js';
 import {
   resumeTime, progressFraction, saveProgress, forgetProgress, continueWatching, clearProgress, formatTime
@@ -450,6 +450,7 @@ async function renderWatch(id, token) {
   // 전에 보던 위치가 있으면 거기서부터 시작한다
   const resumeAt = resumeTime(id);
   watching = { id, meta: null };
+  togetherOnWatch(id, '');
   const player = el('div', { class: 'player' },
     el('iframe', {
       src: embedUrl(id, resumeAt ? `&start=${resumeAt}` : ''),
@@ -486,6 +487,7 @@ async function renderWatch(id, token) {
     setTitle(v.title);
     recordWatch(id);
     if (watching?.id === id) watching.meta = { title: v.title, channel: v.channel };
+    togetherOnWatch(id, v.title);
 
     const owner = el('a', { class: 'owner', href: v.channelId ? `#/channel/${v.channelId}` : '#' },
       safeImg(v.channelAvatar) ? el('img', { src: v.channelAvatar, alt: '' }) : null,
@@ -508,7 +510,7 @@ async function renderWatch(id, token) {
     const autoplay = el('label', { class: 'autoplay-toggle', title: '영상이 끝나면 다음 영상을 자동으로 재생' },
       autoplayBox, el('span', { text: '자동재생' }));
     info.replaceChildren(el('h1', { class: 'watch-title', text: v.title }),
-      el('div', { class: 'watch-actions' }, owner, el('div', { class: 'watch-buttons' }, autoplay, popupBtn)), desc,
+      el('div', { class: 'watch-actions' }, owner, el('div', { class: 'watch-buttons' }, autoplay, togetherButton(id, v.title), popupBtn)), desc,
       commentsSection(id, token));
 
     // 영상이 끝나면 관련 영상 중 안 본 영상으로 넘어간다 (자동재생이 켜져 있을 때)
@@ -1613,6 +1615,7 @@ function updateAccountUI() {
 }
 
 async function logoutNow() {
+  await leaveTogether();
   try { await api('/api/auth/logout', { method: 'POST', body: {} }); } catch {}
   me = null;
   settingsDialog.close();
@@ -1833,6 +1836,7 @@ window.addEventListener('message', (e) => {
     if (ended) onPlayerEnded?.();
   }
   saveWatching(false);
+  togetherPlayerEvent(msg);
 });
 
 // ---------- 이어보기: 보는 중인 영상의 위치를 몇 초마다 저장 ----------
@@ -1920,6 +1924,225 @@ async function openPopup(id, start = Math.floor(playerTime || 0)) {
 }
 
 // 화면 아래에 잠깐 뜨는 안내
+// ---------- 같이 보기 ----------
+// 방장이 '같이 보기'로 친구를 초대하면 친구 화면 오른쪽에 알림이 뜨고, 수락하면 방장 영상을 같은 시간으로 같이 본다.
+// 방장이 재생·멈춤·건너뛰기·영상 바꾸기를 하면 서버(D1)에 알리고, 같이 보는 사람은 1.5초마다 확인해서 맞춘다.
+
+const TOGETHER_KEY = 'together';
+const INVITE_POLL_MS = 15 * 1000;
+let together = null; // { id, host, room } 같이 보는 중이면
+let togetherTimer = null;
+let serverOffset = 0; // 서버 시각 - 내 시각
+let lastPosted = null; // 방장이 마지막으로 알린 상태 { video, pos, playing, at }
+let postingSoon = null;
+const shownInvites = new Set();
+
+const togetherBar = el('div', { class: 'together-bar', hidden: '' });
+const inviteStack = el('div', { class: 'invite-stack', 'aria-live': 'polite' });
+document.body.append(togetherBar, inviteStack);
+
+function saveTogether() {
+  try {
+    if (together) sessionStorage.setItem(TOGETHER_KEY, JSON.stringify({ id: together.id, host: together.host }));
+    else sessionStorage.removeItem(TOGETHER_KEY);
+  } catch {}
+}
+
+// 새로고침해도 같이 보던 방을 이어 간다
+function resumeTogether() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(TOGETHER_KEY) || 'null');
+    if (saved?.id && me?.role === 'user') startTogether(saved.id, saved.host, null);
+  } catch {}
+}
+
+function startTogether(id, host, room) {
+  together = { id, host, room };
+  saveTogether();
+  clearInterval(togetherTimer);
+  togetherTimer = setInterval(syncTogether, host ? 4000 : 1500);
+  if (room) applyRoom(room);
+  else syncTogether();
+}
+
+function endTogether(message) {
+  together = null;
+  lastPosted = null;
+  clearInterval(togetherTimer);
+  togetherTimer = null;
+  saveTogether();
+  drawTogetherBar();
+  if (message) showToast(message);
+}
+
+async function leaveTogether() {
+  const t = together;
+  endTogether();
+  if (t) try { await api('/api/watch/leave', { method: 'POST', body: { id: t.id } }); } catch {}
+}
+
+async function syncTogether() {
+  if (!together || document.hidden && together.host) return;
+  try {
+    applyRoom(await api(`/api/watch/room?id=${together.id}`));
+  } catch (err) {
+    if (['NO_ROOM', 'NOT_MEMBER'].includes(err.code)) endTogether(together?.host ? '' : '방장이 같이 보기를 끝냈어요.');
+  }
+}
+
+function roomExpectedPos(room) {
+  return room.pos + (room.playing ? Math.max(0, Date.now() + serverOffset - room.at) / 1000 : 0);
+}
+
+function applyRoom(room) {
+  if (!together) return;
+  together.room = room;
+  serverOffset = room.serverNow - Date.now();
+  drawTogetherBar();
+  if (together.host) return;
+  // 방장이 나간 지 오래되면 끝
+  if (!room.members.some((m) => m.user === room.host)) return endTogether('방장이 나가서 같이 보기가 끝났어요.');
+  // 영상 화면에 있을 때만 따라간다 (다른 화면을 보고 있으면 아래 막대의 '영상으로'로 돌아감)
+  if (!watching) return;
+  if (watching.id !== room.video) {
+    location.hash = `#/watch/${room.video}`;
+    return;
+  }
+  const expected = roomExpectedPos(room);
+  if (Math.abs(playerTime - expected) > 2.5) playerCommand('seekTo', [expected, true]);
+  if (room.playing && playerState !== PLAYING && playerState !== 3) playerCommand('playVideo');
+  if (!room.playing && playerState === PLAYING) playerCommand('pauseVideo');
+}
+
+function drawTogetherBar() {
+  togetherBar.hidden = !together;
+  if (!together) return togetherBar.replaceChildren();
+  const room = together.room;
+  const names = room ? room.members.map((m) => m.name).join(', ') : '연결 중…';
+  const goBack = !together.host && room && watching?.id !== room.video
+    ? el('a', { href: `#/watch/${room.video}`, text: '영상으로' }) : null;
+  togetherBar.replaceChildren(...[
+    el('span', { class: 'together-dot' }),
+    el('span', { class: 'together-text', text: `같이 보는 중${together.host ? ' (방장)' : ''} · ${names}` }),
+    goBack,
+    el('button', { type: 'button', text: together.host ? '끝내기' : '나가기', onclick: leaveTogether })].filter(Boolean));
+}
+
+// 방장: 영상 화면에 들어오면 (다음 영상 자동재생 포함) 같이 보는 사람들도 그 영상으로
+function togetherOnWatch(id, title) {
+  if (!together?.host) return;
+  postTogether({ video: id, title, pos: playerTime > 0 ? playerTime : resumeTime(id), playing: true });
+}
+
+function postTogether(state) {
+  if (!together?.host) return;
+  lastPosted = { ...state, at: Date.now() };
+  clearTimeout(postingSoon);
+  // 짧은 시간에 여러 번 바뀌면 마지막 것만 보낸다
+  postingSoon = setTimeout(() => {
+    if (!together?.host) return;
+    api('/api/watch/state', { method: 'POST', body: { id: together.id, ...state } }).catch((err) => {
+      if (['NO_ROOM', 'NOT_HOST'].includes(err.code)) endTogether('같이 보기가 끝났어요.');
+    });
+  }, 300);
+}
+
+// 방장 플레이어에서 재생·멈춤이 바뀌거나, 건너뛰었거나, 10초마다
+function togetherPlayerEvent(msg) {
+  if (!together?.host || !watching || !lastPosted || lastPosted.video !== watching.id) return;
+  const playing = playerState === PLAYING;
+  const expected = lastPosted.pos + (lastPosted.playing ? (Date.now() - lastPosted.at) / 1000 : 0);
+  const changedState = msg.state !== undefined && (msg.state === PLAYING || msg.state === PAUSED) && playing !== lastPosted.playing;
+  const jumped = msg.time !== undefined && Math.abs(playerTime - expected) > 3;
+  const stale = playing && Date.now() - lastPosted.at > 10000;
+  if (changedState || jumped || stale) {
+    postTogether({ video: watching.id, title: watching.meta?.title || lastPosted.title || '', pos: playerTime, playing });
+  }
+}
+
+// 영상 화면의 '같이 보기' 버튼: 지금 사용 중인 친구를 골라 초대
+function togetherButton(id, title) {
+  // 다른 사람 방에서 같이 보는 중이면 초대 버튼은 안 보인다 (방장만 초대)
+  if (me?.role !== 'user' || (together && !together.host)) return null;
+  return el('button', { class: 'popup-btn together-btn', type: 'button', onclick: () => openInviteDialog(id, title) },
+    el('span', { text: '같이 보기' }));
+}
+
+async function openInviteDialog(id, title) {
+  const dialog = el('dialog', { class: 'notice invite-dialog' });
+  const list = el('div', { class: 'invite-friends' }, el('p', { class: 'admin-empty', text: '불러오는 중…' }));
+  const status = el('p', { class: 'auth-message', role: 'alert' });
+  const send = el('button', { type: 'button', class: 'primary', text: '초대 보내기' });
+  dialog.append(el('h2', { text: '같이 보기' }),
+    el('p', { class: 'admin-empty', text: '지금 사이트를 쓰고 있는 친구에게 초대를 보내요. 수락하면 이 영상을 같은 시간으로 같이 봐요.' }),
+    list, status,
+    el('div', { class: 'notice-actions' }, el('button', { type: 'button', text: '닫기', onclick: () => dialog.close() }), send));
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  try {
+    const friends = await api('/api/watch/friends');
+    list.replaceChildren(...(friends.length ? friends.map((f) => el('label', {},
+      el('input', { type: 'checkbox', value: f.username }),
+      el('span', { text: `${f.name || f.username} (${f.username})` })))
+      : [el('p', { class: 'admin-empty', text: '지금 사이트를 쓰는 친구가 없어요.' })]));
+  } catch (err) {
+    list.replaceChildren(el('p', { class: 'admin-empty', text: err.message }));
+    send.disabled = true;
+    return;
+  }
+  send.addEventListener('click', async () => {
+    const to = [...list.querySelectorAll('input:checked')].map((b) => b.value);
+    if (!to.length) return void (status.textContent = '초대할 친구를 골라 주세요.');
+    send.disabled = true;
+    try {
+      const room = await api('/api/watch/invite', { method: 'POST', body: { to, video: id, title, pos: playerTime, playing: playerState === PLAYING } });
+      lastPosted = { video: id, title, pos: playerTime, playing: playerState === PLAYING, at: Date.now() };
+      startTogether(room.id, true, room);
+      dialog.close();
+      showToast(`초대를 보냈어요. 친구가 수락하면 같이 봐요.`);
+    } catch (err) {
+      status.textContent = err.message;
+      send.disabled = false;
+    }
+  });
+}
+
+// 나에게 온 초대: 오른쪽에 알림 (수락 / 거절)
+async function checkInvites() {
+  if (!me || me.role !== 'user' || document.hidden || maintenance) return;
+  let invites;
+  try { invites = await api('/api/watch/inbox'); } catch { return; }
+  for (const inv of invites) {
+    if (shownInvites.has(inv.id)) continue;
+    shownInvites.add(inv.id);
+    const card = el('div', { class: 'invite-card', role: 'alert' });
+    const answer = async (accept) => {
+      card.remove();
+      try {
+        const room = await api('/api/watch/answer', { method: 'POST', body: { id: inv.id, accept } });
+        if (!accept) return;
+        if (together) await leaveTogether();
+        startTogether(room.id, false, null);
+        location.hash = `#/watch/${room.video}`;
+      } catch (err) {
+        showToast(err.message);
+      }
+    };
+    card.append(
+      el('strong', { text: `${inv.from}님이 같이 보자고 해요` }),
+      inv.title ? el('span', { text: inv.title }) : null,
+      el('div', {},
+        el('button', { type: 'button', text: '거절', onclick: () => answer(false) }),
+        el('button', { type: 'button', class: 'primary', text: '수락', onclick: () => answer(true) })));
+    inviteStack.append(card);
+    // 초대는 2분 지나면 끝나므로 알림도 없앤다
+    setTimeout(() => card.remove(), Math.max(5000, 2 * 60 * 1000 - (Date.now() + serverOffset - inv.created)));
+  }
+}
+setInterval(checkInvites, INVITE_POLL_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkInvites(); });
+
 function showToast(text) {
   document.querySelector('.toast')?.remove();
   const toast = el('div', { class: 'toast', role: 'status', text });
@@ -2317,4 +2540,7 @@ window.addEventListener('storage', (e) => {
 
 applyDisguise();
 
-loadMe().then(route);
+loadMe().then(() => {
+  route();
+  resumeTogether();
+});

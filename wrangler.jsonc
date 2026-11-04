@@ -7,5 +7,9 @@
   // 계정과 로그인 세션 저장소 (Workers KV: schoolyoutube)
   "kv_namespaces": [
     { "binding": "DB", "id": "e3dc0f97ccaa4302aad8766a2588973c" }
+  ],
+  // 자주 바뀌는 데이터 (같이 보기 등) 저장소 (D1: school)
+  "d1_databases": [
+    { "binding": "D1", "database_name": "school", "database_id": "0e81ee7d-92b9-483e-bd5c-ae3ab061c864" }
   ]
 }

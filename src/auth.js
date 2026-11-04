@@ -222,6 +222,24 @@ async function markSeen(env, user) {
   }
 }
 
+// 지금 사용 중인 승인된 사람 (같이 보기 초대 목록에 씀). 최근 15분 안에 쓴 사람.
+export async function onlineUsers(env) {
+  const seen = await listSeen(env);
+  const now = Date.now();
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.DB.list({ prefix: 'user:', cursor });
+    for (const key of page.keys) {
+      const username = key.metadata?.username || key.name.slice('user:'.length);
+      const t = seen[username.toLowerCase()] || 0;
+      if (key.metadata?.status === 'approved' && now - t < 15 * 60 * 1000) out.push({ username, name: key.metadata?.name || '', lastSeen: t });
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return out.sort((a, b) => b.lastSeen - a.lastSeen);
+}
+
 async function listSeen(env) {
   const seen = {};
   let cursor;
