@@ -1408,10 +1408,9 @@ async function renderAdmin(token) {
   }
 
   // 앱 보이기: 앱마다 모두 / 선택한 사람만 / 아무도 안 보임 (관리자는 언제나 다 보임)
-  // 프록시 앱은 이 설정에 넣지 않는다.
   function appAccessSection() {
     const approved = users.filter((u) => u.status === 'approved');
-    const rows = APPS.filter((a) => !a.off && a.id !== 'proxy').map((a) => {
+    const rows = APPS.filter((a) => !a.off).map((a) => {
       const rule = access[a.id] || { mode: 'all', users: [] };
       const mode = el('select', { 'aria-label': `${a.name} 보이기` },
         ...[['all', '모두에게 보이기'], ['some', '선택한 사람만'], ['none', '아무에게도 안 보이기']].map(([value, text]) => {
