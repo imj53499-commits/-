@@ -200,6 +200,39 @@ async function startUserSession(env, user) {
 // ---------- 세션 확인 (다른 API 에서 사용) ----------
 
 // info 를 넘기면 차단된 계정일 때 info.blockedUser 에 그 계정을 넣어 준다.
+// ---------- 지금 사용 중 (관리자 화면에 보여 줌) ----------
+// KV 무료 쓰기가 하루 1000번이라, 한 사람당 10분에 한 번만 seen:<아이디> 에 마지막 접속 시각을 적는다.
+// 계정 기록(user:)과 따로 둬서 관리자가 그사이 바꾼 내용(차단 등)을 덮어쓰지 않는다.
+export const SEEN_EVERY = 10 * 60 * 1000;
+const seenKey = (username) => `seen:${username.toLowerCase()}`;
+const seenWritten = new WeakMap(); // KV 저장소마다, 이 서버가 최근에 적은 시각 (KV 를 매번 읽지 않게)
+
+async function markSeen(env, user) {
+  const now = Date.now();
+  const key = seenKey(user.username);
+  if (!seenWritten.has(env.DB)) seenWritten.set(env.DB, new Map());
+  const written = seenWritten.get(env.DB);
+  if (now - (written.get(key) || 0) < SEEN_EVERY) return;
+  const last = Number(await env.DB.get(key)) || 0;
+  if (now - last >= SEEN_EVERY) {
+    await env.DB.put(key, String(now), { expirationTtl: 60 * 60 * 24 * 7, metadata: { t: now } });
+    written.set(key, now);
+  } else {
+    written.set(key, last);
+  }
+}
+
+async function listSeen(env) {
+  const seen = {};
+  let cursor;
+  do {
+    const page = await env.DB.list({ prefix: 'seen:', cursor });
+    for (const key of page.keys) seen[key.name.slice('seen:'.length)] = key.metadata?.t || 0;
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return seen;
+}
+
 export async function getSession(request, env, info = {}) {
   const token = getCookie(request, SESSION_COOKIE);
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
@@ -218,6 +251,7 @@ export async function getSession(request, env, info = {}) {
     info.elsewhere = true;
     return null;
   }
+  await markSeen(env, user);
   return { role: 'user', username: user.username, name: user.name || '', mustChange: !!user.mustChange, token };
 }
 
@@ -406,6 +440,7 @@ async function adminLogin(request, env) {
 }
 
 async function listUsers(env) {
+  const seen = await listSeen(env);
   const users = [];
   let cursor;
   do {
@@ -416,7 +451,8 @@ async function listUsers(env) {
         name: key.metadata?.name || '',
         status: key.metadata?.status || 'pending',
         createdAt: key.metadata?.createdAt || 0,
-        blockReason: key.metadata?.blockReason || ''
+        blockReason: key.metadata?.blockReason || '',
+        lastSeen: seen[(key.metadata?.username || key.name.slice('user:'.length)).toLowerCase()] || 0
       });
     }
     cursor = page.list_complete ? undefined : page.cursor;

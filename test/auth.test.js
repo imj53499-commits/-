@@ -441,3 +441,29 @@ test('비밀번호를 바꾼 기기는 계속 로그인돼 있다', async () => 
   assert.equal(changed.status, 200);
   assert.equal((await call('/api/auth/me', { cookie: changed.cookie })).status, 200);
 });
+
+test('지금 사용 중: 쓰면 마지막 접속이 적히고, 10분 안에는 다시 적지 않는다', async () => {
+  await signup('민수');
+  await signup('지수');
+  const a = await adminLogin();
+  await admin('approve', '민수', a.cookie);
+  await admin('approve', '지수', a.cookie);
+  const s = await login('민수');
+
+  const before = Date.now();
+  await call('/api/search?q=x', { cookie: s.cookie });
+  const list = (await call('/api/admin/users', { cookie: a.cookie })).body;
+  const minsu = list.find((u) => u.username === '민수');
+  assert.ok(minsu.lastSeen >= before);
+  assert.equal(list.find((u) => u.username === '지수').lastSeen, 0);
+
+  // 바로 또 써도 다시 저장하지 않는다 (KV 쓰기 아끼기)
+  let writes = 0;
+  const put = env.DB.put.bind(env.DB);
+  env.DB.put = async (key, ...rest) => { if (key.startsWith('seen:')) writes++; return put(key, ...rest); };
+  await call('/api/search?q=x', { cookie: s.cookie });
+  await call('/api/auth/me', { cookie: s.cookie });
+  assert.equal(writes, 0);
+  // 계정 기록(user:)은 건드리지 않는다
+  assert.equal(JSON.parse(env.DB.store.get('user:민수').value).lastSeen, undefined);
+});

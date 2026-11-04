@@ -1266,6 +1266,18 @@ const DEFAULT_NOTICE_BODY = [
   '- 관리자에게 문의는 1시간에 20개까지 보낼 수 있어요'
 ].join('\n');
 
+// 이 시간 안에 접속한 사람을 '지금 사용 중'으로 본다 (서버는 10분에 한 번씩만 접속 시각을 적음)
+const ONLINE_WINDOW = 15 * 60 * 1000;
+
+function timeAgo(t) {
+  const min = Math.floor((Date.now() - t) / 60000);
+  if (min < 1) return '방금';
+  if (min < 60) return `${min}분 전`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  return `${Math.floor(hours / 24)}일 전`;
+}
+
 async function renderAdmin(token) {
   setTitle('가입 승인 관리');
   setActiveNav('');
@@ -1361,7 +1373,7 @@ async function renderAdmin(token) {
     row.append(
       el('div', { class: 'admin-user' },
         el('strong', { text: user.name || '(이름 없음)' }),
-        el('span', { text: [`아이디 ${user.username}`, date].filter(Boolean).join(' · ') }),
+        el('span', { text: [`아이디 ${user.username}`, date, user.lastSeen ? `마지막 접속 ${timeAgo(user.lastSeen)}` : ''].filter(Boolean).join(' · ') }),
         user.status === 'blocked' && user.blockReason ? el('span', { text: `차단 이유: ${user.blockReason}` }) : null),
       el('div', { class: 'admin-actions' }, ...actions));
     // 초기화하면 임시 비밀번호를 이 화면에서 한 번만 보여 준다 (저장되지 않아서 다시 볼 수 없음)
@@ -1457,10 +1469,26 @@ async function renderAdmin(token) {
           ? el('ul', { class: 'admin-list' }, ...list.map(userRow))
           : el('p', { class: 'admin-empty', text: status === 'pending' ? '기다리는 사람이 없어요.' : '없음' }));
     });
-    body.replaceChildren(maintenanceSection(), inbox, noticeSection(), appAccessSection(), ...sections);
+    body.replaceChildren(maintenanceSection(), onlineSection(), inbox, noticeSection(), appAccessSection(), ...sections);
   }
 
   // 앱 보이기: 앱마다 모두 / 선택한 사람만 / 아무도 안 보임 (관리자는 언제나 다 보임)
+  // 지금 사용 중: 최근에 사이트를 쓴 사람 (접속 시각은 10분에 한 번씩만 저장돼서 그 정도 늦을 수 있음)
+  function onlineSection() {
+    const now = Date.now();
+    const online = users.filter((u) => u.status === 'approved' && now - u.lastSeen < ONLINE_WINDOW)
+      .sort((a, b) => b.lastSeen - a.lastSeen);
+    return el('section', { class: 'admin-section' },
+      el('h2', {}, el('span', { class: 'online-dot' }), `지금 사용 중 ${online.length}명`),
+      el('p', { class: 'admin-empty', text: '최근 15분 안에 사이트를 쓴 사람이에요. 새로고침을 누르면 다시 확인해요.' }),
+      online.length
+        ? el('ul', { class: 'online-list' }, ...online.map((u) => el('li', {},
+          el('span', { class: 'online-dot' }),
+          el('strong', { text: u.name || u.username }),
+          el('span', { text: `${u.username} · ${timeAgo(u.lastSeen)}` }))))
+        : el('p', { class: 'admin-empty', text: '지금은 아무도 없어요.' }));
+  }
+
   // 점검: 켜면 관리자 말고는 아무도 못 들어오고 점검 화면만 보인다
   function maintenanceSection() {
     const message = el('textarea', { rows: '3', maxlength: '500', placeholder: '점검 안내 (비워 두면 기본 문구)', 'aria-label': '점검 안내' });
