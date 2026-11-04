@@ -43,6 +43,9 @@ function el(tag, props = {}, ...children) {
 // 차단된 계정·기기면 서버가 알려 준 안내를 담아 두고 차단 화면만 보여 준다.
 let blockedNotice = '';
 
+// 로그인 화면에 띄울 안내 (예: 다른 기기에서 같은 계정으로 로그인했을 때)
+let loginNotice = '';
+
 const NETWORK_ERROR = '서버에 연결하지 못했어요. 인터넷(와이파이)이 끊겼거나 학교·회사 인터넷이 이 주소를 막았을 수 있어요. 잠시 뒤 다시 해 보거나 다른 인터넷(데이터)으로 해 보세요.';
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -60,11 +63,12 @@ async function api(path, { method = 'GET', body } = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     // 로그인이 풀렸으면(승인 취소, 만료 등) 로그인 화면으로 돌아간다.
-    if ((data.code === 'LOGIN_REQUIRED' || data.code === 'BLOCKED') && me) {
+    if (['LOGIN_REQUIRED', 'BLOCKED', 'LOGGED_IN_ELSEWHERE'].includes(data.code) && me) {
       me = null;
       setTimeout(route, 0);
     }
     if (data.code === 'BLOCKED') blockedNotice = data.error;
+    if (data.code === 'LOGGED_IN_ELSEWHERE') loginNotice = data.error;
     const err = new Error(data.error || `요청 실패 (${res.status})`);
     err.code = data.code;
     throw err;
@@ -923,7 +927,9 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
     autocomplete: signup ? 'new-password' : 'current-password', placeholder: signup ? '6자 이상' : '비밀번호'
   });
-  const message = el('p', { class: `auth-message${notice ? ' ok' : ''}`, text: notice, role: 'alert' });
+  const message = notice
+    ? el('p', { class: 'auth-message ok', text: notice, role: 'alert' })
+    : el('p', { class: `auth-message${loginNotice ? ' wait' : ''}`, text: loginNotice, role: 'alert' });
   const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: signup ? '가입 신청하기' : '로그인' }));
   const tab = (key, label) => el('button', {
     type: 'button', class: `auth-tab${mode === key ? ' active' : ''}`, text: label, 'aria-pressed': String(mode === key),
@@ -975,6 +981,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
         return;
       }
       me = await api('/api/auth/login', { method: 'POST', body });
+      loginNotice = '';
       await loadHiddenApps();
       route();
     } catch (err) {
@@ -1486,6 +1493,21 @@ async function loadMe() {
     me = null;
   }
 }
+
+// 다른 기기에서 같은 계정으로 로그인하면, 영상만 보고 있어서 요청이 없어도 알아차리도록
+// 화면을 보고 있는 동안 3분마다, 그리고 이 탭으로 돌아올 때 로그인 상태를 확인한다.
+const SESSION_CHECK_MS = 3 * 60 * 1000;
+let lastSessionCheck = Date.now();
+
+function checkSession() {
+  if (!me || me.role !== 'user' || document.hidden) return;
+  if (Date.now() - lastSessionCheck < 30 * 1000) return; // 너무 자주는 안 함
+  lastSessionCheck = Date.now();
+  api('/api/auth/me').catch(() => {}); // 풀렸으면 api() 가 로그인 화면으로 보낸다
+}
+setInterval(() => { if (Date.now() - lastSessionCheck >= SESSION_CHECK_MS) checkSession(); }, 30 * 1000);
+document.addEventListener('visibilitychange', checkSession);
+window.addEventListener('focus', checkSession);
 
 // ---------- 검색 + 자동완성 ----------
 

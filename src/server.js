@@ -1,5 +1,5 @@
 import { handleApi } from './api.js';
-import { handleAuth, getSession, blockDevice, deviceBlockResponse, json } from './auth.js';
+import { handleAuth, getSession, blockDevice, deviceBlockResponse, json, ELSEWHERE_MESSAGE } from './auth.js';
 import { tokenResponse } from './proxy.js';
 import { handleApps, loadAccess, canUseApp } from './apps.js';
 
@@ -22,6 +22,7 @@ export async function handleRequest(request, env, yt) {
   const session = await getSession(request, env, info);
   if (!session) {
     if (info.blockedUser) return blockDevice(request, env, info.blockedUser);
+    if (info.elsewhere) return json({ error: ELSEWHERE_MESSAGE, code: 'LOGGED_IN_ELSEWHERE' }, 401);
     if (url.pathname === '/api/admin/apps') return json({ error: '관리자 로그인이 필요해요.', code: 'ADMIN_REQUIRED' }, 401);
     return json({ error: '로그인이 필요해요.', code: 'LOGIN_REQUIRED' }, 401);
   }

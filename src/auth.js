@@ -203,6 +203,16 @@ async function createSession(env, data, ttl) {
   return token;
 }
 
+// 사용자 로그인: 한 계정은 한 기기에서만. 새로 로그인하면 계정에 새 번호(sid)를 적어 두고,
+// 예전 기기의 로그인은 번호가 안 맞아서 다음 요청 때 풀린다 ('다른 기기에서 로그인' 안내).
+export const ELSEWHERE_MESSAGE = '다른 기기에서 같은 계정으로 로그인해서 여기서는 로그아웃됐어요.';
+
+async function startUserSession(env, user) {
+  user.sid = randomHex(8);
+  await putUser(env, user);
+  return createSession(env, { role: 'user', username: user.username, pwv: user.pwv || 0, sid: user.sid }, USER_SESSION_TTL);
+}
+
 // ---------- 세션 확인 (다른 API 에서 사용) ----------
 
 // info 를 넘기면 차단된 계정일 때 info.blockedUser 에 그 계정을 넣어 준다.
@@ -219,6 +229,11 @@ export async function getSession(request, env, info = {}) {
   if (!user || user.status !== 'approved') return null;
   // 비밀번호가 바뀌었으면(초기화 포함) 예전 로그인은 풀린다.
   if ((session.pwv || 0) !== (user.pwv || 0)) return null;
+  // 다른 기기에서 더 나중에 로그인했으면 여기는 풀린다
+  if (user.sid && session.sid !== user.sid) {
+    info.elsewhere = true;
+    return null;
+  }
   return { role: 'user', username: user.username, name: user.name || '', mustChange: !!user.mustChange, token };
 }
 
@@ -275,7 +290,7 @@ async function login(request, env) {
   if (user.status === 'pending') return fail('아직 관리자 승인을 기다리고 있어요.', 403, 'PENDING');
   if (user.status !== 'approved') return fail('가입이 승인되지 않았어요.', 403, 'REJECTED');
 
-  const token = await createSession(env, { role: 'user', username: user.username, pwv: user.pwv || 0 }, USER_SESSION_TTL);
+  const token = await startUserSession(env, user);
   return json({ username: user.username, name: user.name || '', role: 'user', mustChange: !!user.mustChange }, 200,
     { 'Set-Cookie': sessionCookie(token, USER_SESSION_TTL) });
 }
@@ -295,10 +310,9 @@ async function changePassword(request, env) {
   user.pwf = await passwordFingerprint(env, next);
   user.mustChange = false;
   delete user.tempExpires;
-  await putUser(env, user);
   // 다른 기기의 로그인은 풀리고, 지금 기기는 새로 로그인된 상태로 둔다.
   await env.DB.delete(`session:${session.token}`);
-  const token = await createSession(env, { role: 'user', username: user.username, pwv: user.pwv }, USER_SESSION_TTL);
+  const token = await startUserSession(env, user);
   return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(token, USER_SESSION_TTL) });
 }
 
@@ -406,6 +420,7 @@ async function me(request, env) {
   const info = {};
   const session = await getSession(request, env, info);
   if (info.blockedUser) return blockDevice(request, env, info.blockedUser);
+  if (info.elsewhere) return fail(ELSEWHERE_MESSAGE, 401, 'LOGGED_IN_ELSEWHERE');
   if (!session) return fail('로그인이 필요해요.', 401, 'LOGIN_REQUIRED');
   return json({ username: session.username || '관리자', name: session.name || '', role: session.role, mustChange: !!session.mustChange });
 }

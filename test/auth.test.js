@@ -443,3 +443,38 @@ test('체험하기는 없어졌고, 예전 체험 로그인도 더 이상 안 �
   const res = await call('/api/search?q=x', { cookie: `sy_session=${token}` });
   assert.equal(res.body.code, 'LOGIN_REQUIRED');
 });
+
+test('같은 계정은 한 기기에서만: 새로 로그인하면 예전 기기는 풀리고 안내가 나온다', async () => {
+  await signup('민수');
+  const a = await adminLogin();
+  await admin('approve', '민수', a.cookie);
+  const first = await login('민수');
+  assert.equal((await call('/api/search?q=x', { cookie: first.cookie })).status, 200);
+
+  const second = await login('민수');
+  assert.equal((await call('/api/search?q=x', { cookie: second.cookie })).status, 200);
+  const old = await call('/api/search?q=x', { cookie: first.cookie });
+  assert.equal(old.status, 401);
+  assert.equal(old.body.code, 'LOGGED_IN_ELSEWHERE');
+  assert.equal((await call('/api/auth/me', { cookie: first.cookie })).body.code, 'LOGGED_IN_ELSEWHERE');
+
+  // 예전 기기에서 다시 로그인하면 이번엔 반대로
+  const third = await login('민수');
+  assert.equal((await call('/api/auth/me', { cookie: third.cookie })).status, 200);
+  assert.equal((await call('/api/auth/me', { cookie: second.cookie })).body.code, 'LOGGED_IN_ELSEWHERE');
+
+  // 다른 계정이나 관리자는 영향 없음
+  const a2 = await adminLogin();
+  assert.equal((await call('/api/admin/users', { cookie: a.cookie })).status, 200);
+  assert.equal((await call('/api/admin/users', { cookie: a2.cookie })).status, 200);
+});
+
+test('비밀번호를 바꾼 기기는 계속 로그인돼 있다', async () => {
+  await signup('민수', 'pass1234');
+  const a = await adminLogin();
+  await admin('approve', '민수', a.cookie);
+  const s = await login('민수', 'pass1234');
+  const changed = await call('/api/auth/password', { method: 'POST', body: { current: 'pass1234', next: 'newpass99' }, cookie: s.cookie });
+  assert.equal(changed.status, 200);
+  assert.equal((await call('/api/auth/me', { cookie: changed.cookie })).status, 200);
+});
