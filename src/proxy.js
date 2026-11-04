@@ -242,9 +242,9 @@ parent!==window&&parent.postMessage({type:'proxy-status',empty:empty,errors:E},'
 setTimeout(status,8000);setTimeout(status,20000);
 if(window.top===window)(function add(){if(!document.body)return setTimeout(add,50);var h=document.createElement('div');
 h.style.cssText='position:fixed;right:14px;bottom:14px;z-index:2147483647';var sh=h.attachShadow?h.attachShadow({mode:'closed'}):h;
-var a=document.createElement('a');a.href='/apps/proxy/';a.textContent='← 프록시';a.title='프록시 화면으로';
+var a=document.createElement('a');a.href='/#/proxy';a.textContent='← 프록시';a.title='프록시 화면으로';
 a.setAttribute('style','display:block;padding:9px 14px;border-radius:20px;background:#6366f1;color:#fff;font:600 14px system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:.85');
-sa.call(a,'href','/apps/proxy/');a.addEventListener('click',function(){window.name='';removeEventListener('pagehide',mark)});sh.appendChild(a);document.body.appendChild(h)})();
+sa.call(a,'href','/#/proxy');a.addEventListener('click',function(){window.name='';removeEventListener('pagehide',mark)});sh.appendChild(a);document.body.appendChild(h)})();
 })();</script>`;
 }
 

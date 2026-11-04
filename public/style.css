@@ -665,3 +665,6 @@ body.app-mode .content, body.app-mode.sidebar-collapsed .content { padding-left:
 .app-access-users { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
 .app-access-users[hidden] { display: none; }
 .app-access-users label { display: flex; align-items: center; gap: 6px; }
+
+/* 프록시: 위쪽 바 아래를 화면(public/apps/proxy/)으로 꽉 채운다 */
+.proxy-frame { position: fixed; top: var(--topbar-h); left: 0; right: 0; bottom: 0; width: 100%; height: calc(100% - var(--topbar-h)); border: 0; background: var(--bg); }

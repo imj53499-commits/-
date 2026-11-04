@@ -3,7 +3,7 @@
 관리자가 승인한 사람만 들어와서 볼 수 있는 YouTube 뷰어입니다. Cloudflare Pages 무료 플랜에서 돌아갑니다.
 
 - 앱 목록: 들어가면 처음에 앱 목록이 나오고, 여기서 School YouTube 를 고름 (왼쪽 위 School 로고나 ⋮⋮⋮ 버튼으로 언제든 돌아옴). 앱을 더 넣으려면 `public/app.js` 의 `APPS` 에 추가
-- 프록시 (`/apps/proxy/`): 주소나 검색어를 넣으면 그 사이트를 이 서버(`/p/*`)를 거쳐서 보여 줌. 로그인한 사람만 (6~12시간짜리 표). 연 페이지는 sandbox 로 격리돼 이 사이트 쿠키·로그인을 못 건드리고, 이 사이트 쿠키를 다른 사이트로 보내지도 않음. 내부 주소(localhost, 사설 IP)는 안 열림. 다른 사이트 로그인(쿠키)·localStorage 가 필요한 곳, 무거운 앱(유튜브·구글 검색 등)은 잘 안 될 수 있음 (`src/proxy.js`)
+- 프록시 (`/#/proxy`, 화면은 `public/apps/proxy/` 를 그 안에 띄움 → 방문 기록엔 `/#/proxy` 만 남음): 주소나 검색어를 넣으면 그 사이트를 이 서버(`/p/*`)를 거쳐서 보여 줌. 로그인한 사람만 (6~12시간짜리 표). 연 페이지는 sandbox 로 격리돼 이 사이트 쿠키·로그인을 못 건드리고, 이 사이트 쿠키를 다른 사이트로 보내지도 않음. 내부 주소(localhost, 사설 IP)는 안 열림. 다른 사이트 로그인(쿠키)·localStorage 가 필요한 곳, 무거운 앱(유튜브·구글 검색 등)은 잘 안 될 수 있음 (`src/proxy.js`)
 - 앱 보이기: 관리자 화면(`/#/admin`) '앱 보이기'에서 앱마다 모두에게 / 선택한 사람만 / 아무에게도 안 보이기를 정함 (관리자는 언제나 다 보임, 바꾼 게 퍼지는 데 최대 30초). 안 보이는 사람은 앱 목록에서 빠지고, 유튜브는 영상 API 도 막힘. 따로 올린 앱 페이지(`public/apps/...`)는 `<head>` 에 `<script src="/app-guard.js" data-app="앱 id"></script>` 를 넣으면 못 보는 사람(로그인 안 한 사람 포함)을 앱 목록으로 돌려보냄 (`src/apps.js`)
 - 홈(YouTube): 앱 목록에서 들어가면 인기/추천 영상 목록 (카테고리: 음악, 게임, 뉴스, 스포츠 …). 카테고리마다 여러 검색어를 들어올 때마다 다른 순서로 써서 사람마다·방문마다 다른 영상이 나오고, 아래로 내리면 계속 더 불러옴 (무한 스크롤)
 - 추천: 최근 본 영상 2개의 관련 영상을 (아래로 내릴수록 그 전에 본 영상들 순서로) 홈(전체)에 인기 영상과 섞어서 보여 줌. 본 영상은 다시 안 나옴. 시청 기록은 브라우저에만 저장 (⚙에서 지우기, 본 쇼츠 목록과 이어보기 위치도 같이 지워짐)
@@ -75,7 +75,7 @@ npm test
 | `src/server.js` | `/api/*` 입구: 로그인 확인 후 영상 API 로 전달 |
 | `src/auth.js` | 가입, 로그인, 세션, 관리자 승인·차단, 문의함, 비밀번호 초기화·변경 (KV 저장) |
 | `src/api.js` | API 라우트 (`/api/home`, `/api/recommend`, `/api/comments`, `/api/shorts`, `/api/search`, `/api/suggest`, `/api/video`, `/api/channel`) + 5분 캐시 |
-| `src/proxy.js`, `functions/p/[[path]].js` | 웹 프록시 (`/p/<표>/https/<사이트>/...`, `/api/proxy/token`), 화면은 `public/apps/proxy/index.html` |
+| `src/proxy.js`, `functions/p/[[path]].js` | 웹 프록시 (`/p/<표>/x/<감춘 사이트>/...`, `/api/proxy/token`), 화면은 `public/apps/proxy/index.html` |
 | `src/apps.js`, `public/app-guard.js` | 앱 보이기 설정 (`/api/apps`, `/api/apps/check`, `/api/admin/apps`, KV `appAccess`) |
 | `src/youtube.js` | YouTube 내부 API 호출과 응답에서 영상 정보 추출 |
 | `public/` | 화면 (HTML/CSS/JS, 빌드 불필요). `popup.html`/`popup.js` 는 팝업 플레이어, `shortcuts.js` 는 단축키, `player.js` 는 플레이어·자동재생·시청 기록 공통 코드 |

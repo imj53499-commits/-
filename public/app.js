@@ -165,7 +165,7 @@ function videoGrid(items, className = 'grid') {
 // ---------- 앱 목록 (처음 화면) ----------
 // 앱을 더 넣을 때는 여기에 하나씩 추가한다.
 const APPS = [
-  { id: 'proxy', name: '프록시', href: '/apps/proxy/', color: 'linear-gradient(135deg, #818cf8, #6366f1 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 6h-2.9a15.7 15.7 0 0 0-1.4-3.6A8 8 0 0 1 18.9 8zM12 4c.8 1.2 1.5 2.5 1.9 4h-3.8c.4-1.5 1.1-2.8 1.9-4zM4.3 14a8.2 8.2 0 0 1 0-4h3.4a16.5 16.5 0 0 0 0 4zm.8 2h2.9c.3 1.3.8 2.5 1.4 3.6A8 8 0 0 1 5.1 16zM8 8H5.1a8 8 0 0 1 4.3-3.6C8.8 5.5 8.3 6.7 8 8zm4 12c-.8-1.2-1.5-2.5-1.9-4h3.8c-.4 1.5-1.1 2.8-1.9 4zm2.3-6H9.7a14.7 14.7 0 0 1 0-4h4.6a14.7 14.7 0 0 1 0 4zm.3 5.6c.6-1.1 1.1-2.3 1.4-3.6h2.9a8 8 0 0 1-4.3 3.6zm1.7-5.6a16.5 16.5 0 0 0 0-4h3.4a8.2 8.2 0 0 1 0 4z"/></svg>' },
+  { id: 'proxy', name: '프록시', href: '#/proxy', color: 'linear-gradient(135deg, #818cf8, #6366f1 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 6h-2.9a15.7 15.7 0 0 0-1.4-3.6A8 8 0 0 1 18.9 8zM12 4c.8 1.2 1.5 2.5 1.9 4h-3.8c.4-1.5 1.1-2.8 1.9-4zM4.3 14a8.2 8.2 0 0 1 0-4h3.4a16.5 16.5 0 0 0 0 4zm.8 2h2.9c.3 1.3.8 2.5 1.4 3.6A8 8 0 0 1 5.1 16zM8 8H5.1a8 8 0 0 1 4.3-3.6C8.8 5.5 8.3 6.7 8 8zm4 12c-.8-1.2-1.5-2.5-1.9-4h3.8c-.4 1.5-1.1 2.8-1.9 4zm2.3-6H9.7a14.7 14.7 0 0 1 0-4h4.6a14.7 14.7 0 0 1 0 4zm.3 5.6c.6-1.1 1.1-2.3 1.4-3.6h2.9a8 8 0 0 1-4.3 3.6zm1.7-5.6a16.5 16.5 0 0 0 0-4h3.4a8.2 8.2 0 0 1 0 4z"/></svg>' },
   { id: 'youtube', name: 'School YouTube', href: '#/youtube', color: 'linear-gradient(135deg, #34d399, #10b981 55%, #0ea5e9)', icon: '<svg viewBox="0 0 24 24"><path d="M9 6.5l9 5.5-9 5.5z"/></svg>' }
 ];
 
@@ -197,6 +197,27 @@ function renderAppHidden() {
   app.replaceChildren(el('div', { class: 'message' },
     el('div', { text: '이 앱은 쓸 수 없어요. 관리자에게 문의해 주세요.' }),
     el('a', { class: 'auth-link', href: '#/', text: '앱 목록으로' })));
+}
+
+async function renderProxy(token, full) {
+  setTitle();
+  setActiveNav('');
+  document.body.classList.add('app-mode', 'proxy-mode');
+  appTitle.textContent = '프록시';
+  if (hiddenApps.has('proxy')) return renderAppHidden();
+  app.replaceChildren(el('p', { class: 'message', text: '불러오는 중…' }));
+  // 안 보이게 된 사람이면 화면 안에서 튕기지 않게 먼저 확인한다
+  try {
+    await api('/api/apps/check?id=proxy');
+  } catch {
+    if (token === renderToken) renderAppHidden();
+    return;
+  }
+  if (token !== renderToken) return;
+  const src = '/apps/proxy/' + (/^[\w-]+$/.test(full) ? `?full=${full}` : '');
+  // 새 탭으로 열린 거면(?full=) 주소에서 지워 둔다
+  if (full) history.replaceState(null, '', '#/proxy');
+  app.replaceChildren(el('iframe', { class: 'proxy-frame', src, title: '프록시', allow: 'fullscreen; autoplay; encrypted-media; picture-in-picture' }));
 }
 
 function renderLauncher() {
@@ -772,7 +793,7 @@ function route() {
   stopWatching();
   closeMobileSearch();
   updateAccountUI();
-  document.body.classList.remove('shorts-mode', 'launcher-mode', 'app-mode');
+  document.body.classList.remove('shorts-mode', 'launcher-mode', 'app-mode', 'proxy-mode');
 
   if (parts[0] === 'admin') return renderAdmin(token);
   document.body.classList.toggle('auth-mode', !me || !!me.mustChange);
@@ -782,6 +803,9 @@ function route() {
   if (!me) return renderAuth(token);
   if (me.mustChange) return renderPassword(token, true);
   if (parts[0] === 'password' && me.role === 'user') return renderPassword(token, false);
+
+  // 프록시: 화면(public/apps/proxy/)을 이 페이지 안에 띄운다. 그래서 방문 기록에는 /#/proxy 만 남는다.
+  if (parts[0] === 'proxy') return renderProxy(token, new URLSearchParams(query).get('full') || '');
 
   // 유튜브를 처음 쓸 때는 이동 단축키부터 정해야 한다 (키보드가 없는 휴대폰은 빼고)
   // 관리자가 유튜브 앱을 안 보이게 했으면

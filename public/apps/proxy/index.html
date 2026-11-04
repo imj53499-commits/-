@@ -52,7 +52,7 @@
 </head>
 <body>
   <div class="bar">
-    <a class="btn" href="/#/" title="앱 목록" aria-label="앱 목록">
+    <a class="btn" href="/#/" target="_top" title="앱 목록" aria-label="앱 목록">
       <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
     </a>
     <button class="btn" id="homeBtn" title="처음 화면" aria-label="처음 화면">
@@ -151,6 +151,11 @@
       const list = [host, ...fullHosts().filter((h) => h !== host)].slice(0, 50);
       try { localStorage.setItem(FULL_KEY, JSON.stringify(list)); } catch { /* 괜찮음 */ }
     }
+    // 메인 사이트의 #/proxy 화면 안에 들어가 있으면, 전체 화면은 바깥(탭 전체)에서 연다
+    const TOPW = (() => {
+      try { return window.top !== window && window.top.location.origin === location.origin ? window.top : window; } catch { return window; }
+    })();
+
     async function openFull(url) {
       let tok;
       try { tok = await getToken(); } catch (e) { return showMessage(e.message, e.login); }
@@ -159,9 +164,9 @@
       try {
         const { loadDisguise, iconFor } = await import('/disguise.js');
         const d = loadDisguise();
-        window.name = '__px:' + JSON.stringify({ d: { title: d.title, icon: iconFor(d.domain) } });
+        TOPW.name = '__px:' + JSON.stringify({ d: { title: d.title, icon: iconFor(d.domain) } });
       } catch { /* 기본 모양(Google)으로 */ }
-      location.href = proxyPath(url, tok);
+      TOPW.location.href = proxyPath(url, tok);
     }
 
     function showMessage(text, login) {
@@ -241,7 +246,7 @@
       // 새 탭도 탭 모양이 유지되게, 새 탭에서 이 화면을 거쳐 전체 화면으로 연다
       // 주소는 감춰서 넘긴다 (방문 기록에 사이트 이름이 안 보이게)
       const code = btoa(unescape(encodeURIComponent(current))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      window.open('/apps/proxy/?full=' + code, '_blank', 'noopener');
+      window.open('/#/proxy?full=' + code, '_blank', 'noopener');
     });
     for (const [name, url] of QUICK) {
       const b = document.createElement('button');

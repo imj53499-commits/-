@@ -94,7 +94,9 @@ export function keepKeyboardFocus() {
   document.body.append(sink);
   window.addEventListener('blur', () => {
     setTimeout(() => {
-      if (document.activeElement?.tagName === 'IFRAME') sink.focus({ preventScroll: true });
+      // 프록시 화면(.proxy-frame)은 안에서 글자를 쳐야 하니 그대로 둔다
+      const active = document.activeElement;
+      if (active?.tagName === 'IFRAME' && !active.classList.contains('proxy-frame')) sink.focus({ preventScroll: true });
     }, 0);
   });
   return sink;
