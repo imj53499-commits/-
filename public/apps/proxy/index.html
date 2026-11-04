@@ -141,6 +141,11 @@
     // 예전 '전체 화면' 기능이 남긴 기록은 지운다
     try { localStorage.removeItem('proxyFullHosts'); } catch { /* 괜찮음 */ }
 
+    // 지금 보는 사이트를 이 탭에만 기억해 둔다. 이동 단축키로 갔다가 뒤로 가기로 돌아오면 다시 연다.
+    function rememberLast(url) {
+      try { sessionStorage.setItem('proxyLast', url); } catch { /* 괜찮음 */ }
+    }
+
     function showMessage(text, login) {
       view.hidden = true;
       start.hidden = false;
@@ -167,6 +172,7 @@
       view.hidden = false;
       $('stuck').hidden = true;
       $('warnBtn').hidden = true;
+      rememberLast(url);
       view.src = proxyPath(url, tok);
     }
 
@@ -198,6 +204,7 @@
       }
       if (e.data?.type !== 'proxy-page') return;
       current = String(e.data.url || '');
+      rememberLast(current);
       if (document.activeElement !== addr) addr.value = current;
     });
 
@@ -209,6 +216,7 @@
     $('homeBtn').addEventListener('click', () => {
       $('stuck').hidden = true;
       view.hidden = true; view.removeAttribute('src'); start.hidden = false; addr.value = ''; current = '';
+      try { sessionStorage.removeItem('proxyLast'); } catch { /* 괜찮음 */ }
       $('bigInput').focus();
     });
     for (const [name, url] of QUICK) {
@@ -219,12 +227,42 @@
       $('links').append(b);
     }
     // 들어올 때 로그인돼 있는지 미리 확인
-    getToken().catch((e) => showMessage(e.message, e.login));
+    // 이동 단축키로 갔다가 돌아온 거면 보던 사이트를 다시 연다
+    let resume = '';
+    try {
+      if (sessionStorage.getItem('proxyResume') === '1') resume = sessionStorage.getItem('proxyLast') || '';
+      sessionStorage.removeItem('proxyResume');
+    } catch { /* 괜찮음 */ }
+    if (/^https?:\/\//i.test(resume)) go(resume);
+    else getToken().catch((e) => showMessage(e.message, e.login));
   </script>
   <script type="module">
     // 이 화면의 탭도 메인 사이트에서 정한 탭 모양으로
     import { applyDisguise } from '/disguise.js';
+    import { loadJump, matchesShortcut, isTypingKey, isTypingTarget } from '/shortcuts.js';
     applyDisguise();
+
+    // 이동 단축키: 이 화면이나 프록시로 연 사이트 안에서 눌러도 동작하게 한다.
+    // 메인 사이트(#/proxy) 안에 있으면 메인 화면에 알려서 이동하고(뒤로 가기로 돌아올 수 있음), 따로 열려 있으면 직접 이동한다.
+    function jumpNow() {
+      const jump = loadJump();
+      if (!jump) return;
+      if (window.top !== window) window.top.postMessage({ type: 'sy-jump' }, location.origin);
+      else location.href = jump.url;
+    }
+    function check(e, typing) {
+      const jump = loadJump();
+      if (!jump || !matchesShortcut(e, jump.shortcut)) return false;
+      if (isTypingKey(jump.shortcut) && typing) return false;
+      jumpNow();
+      return true;
+    }
+    addEventListener('keydown', (e) => { if (check(e, isTypingTarget(e.target))) e.preventDefault(); }, true);
+    addEventListener('message', (e) => {
+      const d = e.data;
+      if (e.source !== document.getElementById('view').contentWindow || d?.type !== 'proxy-key') return;
+      check({ code: String(d.code), ctrlKey: !!d.ctrl, altKey: !!d.alt, shiftKey: !!d.shift, metaKey: !!d.meta }, !!d.typing);
+    });
   </script>
 </body>
 </html>

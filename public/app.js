@@ -1806,12 +1806,24 @@ function needsJumpSetup() {
 function jumpAway() {
   if (!jump) return;
   saveWatching(true);
+  // 프록시로 보던 중이면 돌아왔을 때 그 사이트를 다시 연다 (public/apps/proxy/ 가 읽음)
+  if (document.querySelector('.proxy-frame')) {
+    try { sessionStorage.setItem('proxyResume', '1'); } catch {}
+  }
   closePopup();
   leaveFullscreen();
   document.documentElement.style.visibility = 'hidden';
   document.querySelectorAll('iframe').forEach((f) => f.remove());
-  location.replace(jump.url); // 뒤로 가기로 돌아오지 않게
+  // 일반 이동이라 그 사이트에서 브라우저 뒤로 가기를 누르면 이 화면으로 돌아온다
+  location.href = jump.url;
 }
+
+// 뒤로 가기로 돌아왔을 때 (브라우저가 이 페이지를 그대로 기억해 둔 경우) 가려 둔 화면을 다시 보여 준다
+window.addEventListener('pageshow', (e) => {
+  if (!e.persisted || document.documentElement.style.visibility !== 'hidden') return;
+  document.documentElement.style.visibility = '';
+  route();
+});
 
 // "classroom.google.com" 처럼 넣어도 https:// 를 붙여 준다. 틀리면 ''.
 function cleanJumpUrl(input) {
@@ -1935,6 +1947,12 @@ window.addEventListener('keydown', (e) => {
 
 // 팝업에서 눌렀을 때
 jumpChannel()?.addEventListener('message', (e) => { if (e.data === 'jump') jumpAway(); });
+// 프록시 화면(.proxy-frame) 안에서 이동 단축키를 누르면 여기로 알려 온다
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin || e.data?.type !== 'sy-jump') return;
+  if (![...document.querySelectorAll('.proxy-frame')].some((f) => f.contentWindow === e.source)) return;
+  jumpAway();
+});
 
 // 다른 탭에서 바꾸면 여기도 바로 적용
 window.addEventListener('storage', (e) => {

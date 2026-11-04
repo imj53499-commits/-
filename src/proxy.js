@@ -257,6 +257,9 @@ new MutationObserver(function(ms){ms.forEach(function(m){if(m.type==='attributes
 .observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:A});
 document.addEventListener('submit',function(e){var fm=e.target;if(fm&&fm.getAttribute){var a=fm.getAttribute('action');if(a==null||a==='')fm.setAttribute('action',px(base()));}},true);
 function tell(){try{parent!==window&&parent.postMessage({type:'proxy-page',url:decodeURI(base()),title:document.title},'*')}catch(e){}}
+// 이동 단축키가 이 화면 안에서도 먹히게 누른 키를 바깥(프록시 화면)에 알린다. 입력칸에 글자를 칠 때는 Ctrl/Alt 조합만 보낸다.
+addEventListener('keydown',function(e){try{var t=e.target,ty=!!t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName||''));
+if(ty&&!e.ctrlKey&&!e.altKey&&!e.metaKey)return;parent!==window&&parent.postMessage({type:'proxy-key',code:e.code,ctrl:e.ctrlKey,alt:e.altKey,shift:e.shiftKey,meta:e.metaKey,typing:ty},'*')}catch(x){}},true);
 if(window.top===window)(function(){
 var DT=(D&&typeof D.title==='string'&&D.title)||'Google',
 DI=(D&&typeof D.icon==='string'&&(D.icon.indexOf('data:image/')===0||D.icon.indexOf('https://www.google.com/s2/favicons')===0)&&D.icon)||"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none' stroke='%239aa0a6' stroke-width='2.2'%3E%3Ccircle cx='16' cy='16' r='12'/%3E%3Cpath d='M4 16h24M16 4c4 4 4 20 0 24M16 4c-4 4-4 20 0 24'/%3E%3C/svg%3E";
