@@ -1,10 +1,12 @@
 // 단축키 저장/비교 도우미. 메인 화면(app.js)과 팝업(popup.js)이 같이 쓴다.
 // 키는 e.code 로 비교해서 한/영 상태와 상관없이 같은 키로 동작한다. 설정은 이 브라우저의 localStorage 에 저장된다.
 
+export const COVER_SHORTCUT_KEY = 'exitShortcut';
 // 이동 단축키: 누르면 사용자가 정한 사이트로 바로 이동한다 (처음 유튜브에 들어갈 때 정함)
 export const JUMP_SHORTCUT_KEY = 'jumpShortcut';
 export const JUMP_URL_KEY = 'jumpUrl';
 export const POPUP_SHORTCUT_KEY = 'popupShortcut';
+export const DEFAULT_COVER_SHORTCUT = { code: 'Backquote', ctrl: false, alt: false, shift: false, meta: false };
 export const DEFAULT_POPUP_SHORTCUT = { code: 'KeyQ', ctrl: false, alt: false, shift: false, meta: false };
 
 export const MODIFIER_CODES = /^(Control|Shift|Alt|Meta|OS)(Left|Right)?$|^(CapsLock|Fn|HangulMode|Hanja|Lang1|Lang2)$/;

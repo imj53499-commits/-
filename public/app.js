@@ -1,5 +1,5 @@
 import {
-  POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT, MODIFIER_CODES,
+  COVER_SHORTCUT_KEY, POPUP_SHORTCUT_KEY, DEFAULT_COVER_SHORTCUT, DEFAULT_POPUP_SHORTCUT, MODIFIER_CODES,
   loadShortcut, storeShortcut, shortcutFromEvent, shortcutLabel, matchesShortcut, isTypingKey, isTypingTarget,
   keepKeyboardFocus, JUMP_SHORTCUT_KEY, JUMP_URL_KEY, loadJump, saveJump, jumpChannel
 } from './shortcuts.js';
@@ -514,9 +514,9 @@ async function renderWatch(id, token) {
       el('div', { class: 'watch-actions' }, owner, el('div', { class: 'watch-buttons' }, autoplay, togetherButton(id, v.title), popupBtn)), desc,
       commentsSection(id, token));
 
-    // 영상이 끝나면 관련 영상 중 안 본 영상으로 넘어간다 (자동재생이 켜져 있을 때)
+    // 영상이 끝나면 관련 영상 중 안 본 영상으로 넘어간다 (자동재생이 켜져 있고 화면을 가리지 않았을 때)
     onPlayerEnded = () => {
-      if (!loadAutoplay()) return;
+      if (!loadAutoplay() || !cover.hidden) return;
       const next = pickNext(v.related, id);
       if (next) location.hash = `#/watch/${next.id}`;
     };
@@ -1810,7 +1810,7 @@ document.getElementById('themeBtn').addEventListener('click', () => {
   try { localStorage.setItem('theme', next); } catch {}
 });
 
-// ---------- 플레이어 제어 ----------
+// ---------- 플레이어 제어 (가리기 할 때 멈추고, 돌아오면 다시 재생) ----------
 // YouTube 임베드 플레이어와 postMessage 로 주고받는다. playerState 1 = 재생 중
 
 let playerState = -1;
@@ -1821,8 +1821,8 @@ function listenToPlayer(iframe) {
   playerState = -1;
   playerTime = 0;
   listenTo(iframe);
-  // 자동재생이 막혔으면 음소거로 시작한다.
-  autostart(iframe, () => playerState, iframe.parentElement);
+  // 자동재생이 막혔으면 음소거로 시작한다. 화면을 가린 중에는 건드리지 않는다.
+  autostart(iframe, () => (cover.hidden ? playerState : PAUSED), iframe.parentElement);
 }
 
 function playerCommand(func, args) {
@@ -2344,13 +2344,58 @@ function closePopup() {
   popupWin = null;
 }
 
-// ---------- 전체 화면 끄기 (이동 단축키로 다른 사이트로 갈 때) ----------
+// ---------- 가리기 (단축키: 한 번 누르면 빈 화면, 다시 누르면 원래 화면) ----------
 
+const cover = el('div', { class: 'cover', hidden: '' });
+document.body.append(cover);
+let resumeAfterCover = false;
+
+// 가린 화면: 검색 시작 페이지처럼 보이게 하고, 검색하면 실제 Google 검색으로 간다.
+// 가릴 때만 그리고 돌아오면 지운다 (평소 페이지에는 이 모양이 없도록).
+function showDecoy() {
+  const input = el('input', { type: 'text', name: 'q', autocomplete: 'off', spellcheck: 'false', 'aria-label': '검색' });
+  const form = el('form', { class: 'decoy-search', role: 'search' },
+    el('span', { class: 'decoy-icon', 'aria-hidden': 'true' }),
+    input);
+  const submit = () => {
+    const q = input.value.trim();
+    if (q) location.href = `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  };
+  form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
+  cover.replaceChildren(el('div', { class: 'decoy' },
+    el('div', { class: 'decoy-logo', 'aria-label': 'Google' },
+      ...[...'Google'].map((ch, i) => el('span', { class: `decoy-c${i}`, text: ch }))),
+    form,
+    el('div', { class: 'decoy-buttons' },
+      el('button', { type: 'button', text: 'Google 검색', onclick: submit }),
+      el('button', { type: 'button', text: "I'm Feeling Lucky", onclick: submit }))));
+}
+
+// 전체 화면이면 가린 화면이 영상 뒤에 깔려서 안 보이므로 먼저 전체 화면을 끈다
 function leaveFullscreen() {
   try {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else if (document.webkitFullscreenElement) document.webkitExitFullscreen();
   } catch {}
+}
+
+function toggleCover() {
+  if (cover.hidden) {
+    leaveFullscreen();
+    resumeAfterCover = playerState === 1;
+    playerCommand('pauseVideo');
+    closePopup();
+    document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+    closeMobileSearch();
+    showDecoy();
+    cover.hidden = false;
+    focusSink.focus({ preventScroll: true });
+  } else {
+    cover.hidden = true;
+    cover.replaceChildren();
+    if (resumeAfterCover) playerCommand('playVideo');
+    resumeAfterCover = false;
+  }
 }
 
 // ---------- 빠른 나가기 (버튼: Google 로 완전히 나가기) ----------
@@ -2467,7 +2512,9 @@ function renderJumpSetup(token, next) {
     const sc = shortcutFromEvent(e);
     window.removeEventListener('keydown', onKey, true);
     setListening(false);
-    if (matchesShortcut(e, popupShortcut)) {
+    if (matchesShortcut(e, coverShortcut)) {
+      message.textContent = `${shortcutLabel(sc)} 는 화면 가리기 단축키라서 쓸 수 없어요. 다른 키를 정해 주세요.`;
+    } else if (matchesShortcut(e, popupShortcut)) {
       message.textContent = `${shortcutLabel(sc)} 는 팝업 닫기 단축키라서 쓸 수 없어요. 다른 키를 정해 주세요.`;
     } else {
       picked = sc;
@@ -2546,18 +2593,34 @@ function updateJumpInfo() {
   document.getElementById('jumpUrlLabel').textContent = jump ? jump.url.replace(/^https?:\/\//, '').replace(/\/$/, '') : '정하지 않음';
 }
 
-// ---------- 단축키 (팝업 닫기). 설정에서 바꿀 수 있고 이 브라우저에 저장된다 ----------
+// ---------- 단축키 (가리기 / 팝업 닫기). 설정에서 바꿀 수 있고 이 브라우저에 저장된다 ----------
 
-// 예전 '화면 가리기' 단축키 설정은 지운다
-try { localStorage.removeItem('exitShortcut'); } catch {}
+let coverShortcut = loadShortcut(COVER_SHORTCUT_KEY, DEFAULT_COVER_SHORTCUT);
 let popupShortcut = loadShortcut(POPUP_SHORTCUT_KEY, DEFAULT_POPUP_SHORTCUT);
 let recordingFor = null; // 키를 기다리는 중인 설정 줄
+
+window.addEventListener('keydown', (e) => {
+  if (recordingFor || pickingJumpKey) return;
+  if (!matchesShortcut(e, coverShortcut)) return;
+  if (isTypingKey(coverShortcut) && isTypingTarget(e.target)) return;
+  e.preventDefault();
+  toggleCover();
+}, true);
 
 // ---------- 설정 창: 단축키 바꾸기 ----------
 
 const settingsDialog = document.getElementById('settingsDialog');
 
 const shortcutRows = {
+  cover: {
+    label: document.getElementById('shortcutLabel'),
+    change: document.getElementById('shortcutChange'),
+    get: () => coverShortcut,
+    set: (sc) => { coverShortcut = sc; storeShortcut(COVER_SHORTCUT_KEY, sc); },
+    fallback: DEFAULT_COVER_SHORTCUT,
+    reset: 'shortcutReset',
+    off: 'shortcutOff'
+  },
   popup: {
     label: document.getElementById('popupShortcutLabel'),
     change: document.getElementById('popupShortcutChange'),
