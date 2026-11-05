@@ -286,14 +286,50 @@ async function signup(request, env) {
   return json({ ok: true, status: 'pending' }, 201);
 }
 
+// ---------- 로그인 무차별 대입 막기 ----------
+// 틀린 비밀번호가 일정 횟수를 넘으면 그 IP 는 잠깐 로그인 자체를 막는다.
+// 맞으면 센 기록을 지운다. KV 쓰기는 '틀렸을 때'만 생겨서 평소엔 거의 안 쓴다.
+// 학교는 여럿이 같은 IP 를 써서 사용자 로그인은 넉넉하게, 관리자 로그인은 빡빡하게 둔다.
+const LOGIN_WINDOW = 15 * 60; // 15분
+const USER_LOGIN_MAX = 30;    // 같은 IP 에서 15분에 틀린 로그인 30번
+const ADMIN_LOGIN_MAX = 8;    // 관리자는 8번
+
+function clientIp(request) {
+  return request.headers.get('CF-Connecting-IP') || 'unknown';
+}
+
+// 막혀 있으면 429 응답을, 아니면 null 을 준다
+async function loginThrottle(env, kind, ip) {
+  const n = Number(await env.DB.get(`rl:${kind}:${ip}`)) || 0;
+  const max = kind === 'admin' ? ADMIN_LOGIN_MAX : USER_LOGIN_MAX;
+  if (n >= max) return fail('로그인을 너무 많이 틀렸어요. 15분 뒤에 다시 해 주세요.', 429, 'RATE_LIMIT');
+  return null;
+}
+
+async function loginFailed(env, kind, ip) {
+  const key = `rl:${kind}:${ip}`;
+  const n = (Number(await env.DB.get(key)) || 0) + 1;
+  await env.DB.put(key, String(n), { expirationTtl: LOGIN_WINDOW });
+}
+
+async function loginOk(env, kind, ip) {
+  await env.DB.delete(`rl:${kind}:${ip}`);
+}
+
 async function login(request, env) {
+  const ip = clientIp(request);
+  const blocked = await loginThrottle(env, 'login', ip);
+  if (blocked) return blocked;
   const body = await readJson(request);
   const username = String(body?.username ?? '').trim();
   const password = String(body?.password ?? '');
   const user = USERNAME.test(username) ? await env.DB.get(userKey(username), 'json') : null;
   // 아이디가 없을 때도 똑같이 계산해서, 응답 시간으로 아이디 존재 여부를 알 수 없게 한다.
   const hash = await hashPassword(password, user?.salt || 'no-user');
-  if (!user || !safeEqual(hash, user.hash)) return fail('아이디 또는 비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
+  if (!user || !safeEqual(hash, user.hash)) {
+    await loginFailed(env, 'login', ip);
+    return fail('아이디 또는 비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
+  }
   if (user.mustChange && user.tempExpires && Date.now() > user.tempExpires) {
     return fail('임시 비밀번호가 만료됐어요. 관리자에게 다시 문의해 주세요.', 401, 'TEMP_EXPIRED');
   }
@@ -301,6 +337,7 @@ async function login(request, env) {
   if (user.status === 'pending') return fail('아직 관리자 승인을 기다리고 있어요.', 403, 'PENDING');
   if (user.status !== 'approved') return fail('가입이 승인되지 않았어요.', 403, 'REJECTED');
 
+  await loginOk(env, 'login', ip);
   const token = await startUserSession(env, user);
   return json({ username: user.username, name: user.name || '', role: 'user', mustChange: !!user.mustChange }, 200,
     { 'Set-Cookie': sessionCookie(token, USER_SESSION_TTL) });
@@ -437,10 +474,17 @@ async function me(request, env) {
 
 async function adminLogin(request, env) {
   if (!env.ADMIN_PASSWORD) return fail('관리자 비밀번호(ADMIN_PASSWORD)가 아직 설정되지 않았어요.', 500, 'NO_ADMIN_PASSWORD');
+  const ip = clientIp(request);
+  const blocked = await loginThrottle(env, 'admin', ip);
+  if (blocked) return blocked;
   const body = await readJson(request);
   // 길이가 달라도 비교 시간이 같도록 해시끼리 비교한다.
   const ok = safeEqual(await sha256Hex(String(body?.password ?? '')), await sha256Hex(env.ADMIN_PASSWORD));
-  if (!ok) return fail('관리자 비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
+  if (!ok) {
+    await loginFailed(env, 'admin', ip);
+    return fail('관리자 비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
+  }
+  await loginOk(env, 'admin', ip);
   const token = await createSession(env, { role: 'admin' }, ADMIN_SESSION_TTL);
   // 관리자가 로그인한 기기는 차단 표시를 지운다 (공용 컴퓨터가 잘못 막혔을 때 풀 수 있게)
   const device = getCookie(request, DEVICE_COOKIE);

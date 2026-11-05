@@ -467,3 +467,17 @@ test('지금 사용 중: 쓰면 마지막 접속이 적히고, 10분 안에는 �
   // 계정 기록(user:)은 건드리지 않는다
   assert.equal(JSON.parse(env.DB.store.get('user:민수').value).lastSeen, undefined);
 });
+
+test('관리자 로그인을 여러 번 틀리면 잠깐 막힌다', async () => {
+  const bad = { password: 'wrong' };
+  let last;
+  for (let i = 0; i < 8; i++) {
+    last = await handleRequest(new Request('https://site.test/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'CF-Connecting-IP': '1.2.3.4' }, body: JSON.stringify(bad) }), env, {});
+  }
+  // 9번째는 비번이 맞아도 429 로 막힌다
+  const blocked = await handleRequest(new Request('https://site.test/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'CF-Connecting-IP': '1.2.3.4' }, body: JSON.stringify({ password: 'admin-secret' }) }), env, {});
+  assert.equal(blocked.status, 429);
+  // 다른 IP 는 멀쩡하다
+  const other = await handleRequest(new Request('https://site.test/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'CF-Connecting-IP': '9.9.9.9' }, body: JSON.stringify({ password: 'admin-secret' }) }), env, {});
+  assert.equal(other.status, 200);
+});
