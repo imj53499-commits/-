@@ -7,14 +7,14 @@ import { handleWatch } from './watch.js';
 import { handleFriends } from './friends.js';
 import { loadMaintenance, maintenanceResponse, handleMaintenanceAdmin } from './maintenance.js';
 import { bumpRequest, handleStats } from './stats.js';
+import { isBot } from './bots.js';
 
 // /api/* 요청의 입구. 계정 관련 요청은 auth 로, 나머지(영상 API)는 승인된 사용자만 쓸 수 있다.
 // 로그인 없이는 아무것도 못 쓴다. KV 저장소(DB)를 연결하지 않았으면 로그인을 할 수 없으니 전부 막는다.
 export async function handleRequest(request, env, yt) {
   const url = new URL(request.url);
   // 봇·크롤러(ClaudeBot, GPTBot, Googlebot 등)는 막는다. 로그인해야 쓰는 사이트라 사람만 들어온다.
-  const ua = request.headers.get('User-Agent') || '';
-  if (/bot|crawl|spider|slurp|scrape|wget|python-requests|httpclient|gptbot|claudebot|ccbot|bytespider|petalbot|ahrefs|semrush|dataforseo|facebookexternalhit|bingpreview|yandex|baidu|googlebot/i.test(ua)) {
+  if (isBot(request.headers.get('User-Agent'))) {
     return new Response('이 사이트는 사람만 쓸 수 있어요.', { status: 403, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Robots-Tag': 'noindex, nofollow' } });
   }
   const isAuth = url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/admin/');
