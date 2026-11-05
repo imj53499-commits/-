@@ -131,3 +131,13 @@ test('프록시를 숨기거나 승인 취소하면 이미 받은 표도 바로 
   clearAllowCache();
   assert.equal((await use(tok)).status, 403);
 });
+
+test('봇 User-Agent 는 막고, 보통 브라우저는 통과시킨다', async () => {
+  const bot = await handleRequest(new Request('https://site.test/api/home', { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ClaudeBot/1.0)' } }), env, fakeYt);
+  assert.equal(bot.status, 403);
+  const gpt = await handleRequest(new Request('https://site.test/api/home', { headers: { 'User-Agent': 'GPTBot/1.1' } }), env, fakeYt);
+  assert.equal(gpt.status, 403);
+  // 보통 브라우저는 봇 차단이 아니라 로그인 필요(401)로 넘어간다
+  const human = await handleRequest(new Request('https://site.test/api/home', { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36' } }), env, fakeYt);
+  assert.equal(human.status, 401);
+});

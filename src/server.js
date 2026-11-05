@@ -12,6 +12,11 @@ import { bumpRequest, handleStats } from './stats.js';
 // 로그인 없이는 아무것도 못 쓴다. KV 저장소(DB)를 연결하지 않았으면 로그인을 할 수 없으니 전부 막는다.
 export async function handleRequest(request, env, yt) {
   const url = new URL(request.url);
+  // 봇·크롤러(ClaudeBot, GPTBot, Googlebot 등)는 막는다. 로그인해야 쓰는 사이트라 사람만 들어온다.
+  const ua = request.headers.get('User-Agent') || '';
+  if (/bot|crawl|spider|slurp|scrape|wget|python-requests|httpclient|gptbot|claudebot|ccbot|bytespider|petalbot|ahrefs|semrush|dataforseo|facebookexternalhit|bingpreview|yandex|baidu|googlebot/i.test(ua)) {
+    return new Response('이 사이트는 사람만 쓸 수 있어요.', { status: 403, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Robots-Tag': 'noindex, nofollow' } });
+  }
   const isAuth = url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/admin/');
   if (!env.DB) return json({ error: '로그인 기능이 아직 설정되지 않았어요. (KV 저장소 DB 연결 필요)', code: 'NO_DB' }, 503);
   // 사용량 통계용으로 요청 수를 센다 (10분에 한 번만 KV 에 모아서 적음)
