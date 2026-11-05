@@ -36,6 +36,17 @@
     .big input { flex: 1; min-width: 0; height: 48px; padding: 0 20px; border-radius: 24px; border: 1px solid var(--border); background: var(--bg-soft); color: inherit; font-size: 16px; outline: none; }
     .big input:focus { border-color: var(--accent); background: var(--bg); }
     .links { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 560px; margin: 0 auto; }
+    .favs { max-width: 560px; margin: 0 auto 18px; }
+    .favs-title { font-size: 13px; color: var(--text-sub); margin-bottom: 8px; }
+    .fav-list { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .fav { display: flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg); overflow: hidden; }
+    .fav button { background: none; border: 0; color: inherit; cursor: pointer; }
+    .fav .fav-open { padding: 9px 4px 9px 14px; font-size: 14px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fav .fav-open:hover { color: var(--accent); }
+    .fav .fav-del { padding: 9px 12px 9px 6px; color: var(--text-sub); font-size: 16px; line-height: 1; }
+    .fav .fav-del:hover { color: #e5484d; }
+    .btn.on { color: var(--accent); }
+    .btn.on svg { fill: currentColor; stroke: currentColor; }
     .links button { padding: 10px 16px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg); color: inherit; font-size: 14px; cursor: pointer; }
     .links button:hover { background: var(--bg-hover); }
     .msg { color: var(--text-sub); }
@@ -67,12 +78,16 @@
     <button class="btn" id="warnBtn" hidden title="문제 보기" aria-label="문제 보기" style="color:#f59e0b">
       <svg viewBox="0 0 24 24"><path d="M12 3l10 18H2zM12 10v5M12 18v.01"/></svg>
     </button>
+    <button class="btn" id="favBtn" hidden title="즐겨찾기에 넣기" aria-label="즐겨찾기에 넣기">
+      <svg viewBox="0 0 24 24"><path d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 21l1.1-6.5L2.6 9.8l6.5-.9z"/></svg>
+    </button>
   </div>
   <main>
     <div class="start" id="start">
       <h1>프록시</h1>
       <p>보고 싶은 사이트 주소나 검색어를 넣으세요.<br>모든 요청이 이 서버를 거쳐서 열려요.</p>
       <form class="big" id="bigForm"><input id="bigInput" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="예: ko.wikipedia.org 또는 검색어" autofocus></form>
+      <div class="favs" id="favs" hidden><div class="favs-title">즐겨찾기</div><div class="fav-list" id="favList"></div></div>
       <div class="links" id="links"></div>
       <p class="msg" id="msg" hidden></p>
     </div>
@@ -146,6 +161,52 @@
       try { sessionStorage.setItem('proxyLast', url); } catch { /* 괜찮음 */ }
     }
 
+    // ---------- 즐겨찾기 (이 브라우저에만 저장) ----------
+    const FAV_KEY = 'proxyFavorites';
+    function loadFavs() {
+      try { const a = JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+    }
+    function saveFavs(list) {
+      try { localStorage.setItem(FAV_KEY, JSON.stringify(list.slice(0, 50))); } catch { /* 괜찮음 */ }
+    }
+    function favName(url) {
+      try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+    }
+    function isFav(url) {
+      return loadFavs().some((f) => f.url === url);
+    }
+    function toggleFav() {
+      if (!current) return;
+      const list = loadFavs();
+      const i = list.findIndex((f) => f.url === current);
+      if (i >= 0) list.splice(i, 1);
+      else list.unshift({ url: current, name: favName(current) });
+      saveFavs(list);
+      updateFavBtn();
+      renderFavs();
+    }
+    function updateFavBtn() {
+      const on = !!current && isFav(current);
+      $('favBtn').hidden = !current;
+      $('favBtn').classList.toggle('on', on);
+      $('favBtn').title = on ? '즐겨찾기에서 빼기' : '즐겨찾기에 넣기';
+    }
+    function renderFavs() {
+      const list = loadFavs();
+      $('favs').hidden = list.length === 0;
+      $('favList').replaceChildren(...list.map((f) => {
+        const open = document.createElement('button');
+        open.type = 'button'; open.className = 'fav-open'; open.textContent = f.name || favName(f.url); open.title = f.url;
+        open.addEventListener('click', () => go(f.url));
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'fav-del'; del.textContent = '×'; del.setAttribute('aria-label', (f.name || favName(f.url)) + ' 빼기');
+        del.addEventListener('click', () => { saveFavs(loadFavs().filter((x) => x.url !== f.url)); updateFavBtn(); renderFavs(); });
+        const wrap = document.createElement('div'); wrap.className = 'fav';
+        wrap.append(open, del);
+        return wrap;
+      }));
+    }
+
     function showMessage(text, login) {
       view.hidden = true;
       start.hidden = false;
@@ -173,6 +234,7 @@
       $('stuck').hidden = true;
       $('warnBtn').hidden = true;
       rememberLast(url);
+      updateFavBtn();
       view.src = proxyPath(url, tok);
     }
 
@@ -205,6 +267,7 @@
       if (e.data?.type !== 'proxy-page') return;
       current = String(e.data.url || '');
       rememberLast(current);
+      updateFavBtn();
       if (document.activeElement !== addr) addr.value = current;
     });
 
@@ -213,10 +276,13 @@
     $('reloadBtn').addEventListener('click', () => { if (current) go(current); });
     $('stuckClose').addEventListener('click', () => { $('stuck').hidden = true; });
     $('warnBtn').addEventListener('click', () => { $('stuck').hidden = !$('stuck').hidden; });
+    $('favBtn').addEventListener('click', toggleFav);
+    renderFavs();
     $('homeBtn').addEventListener('click', () => {
       $('stuck').hidden = true;
       view.hidden = true; view.removeAttribute('src'); start.hidden = false; addr.value = ''; current = '';
       try { sessionStorage.removeItem('proxyLast'); } catch { /* 괜찮음 */ }
+      updateFavBtn(); renderFavs();
       $('bigInput').focus();
     });
     for (const [name, url] of QUICK) {

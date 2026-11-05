@@ -1389,10 +1389,11 @@ async function renderAdmin(token) {
   let access;
   let notice;
   let maint;
+  let stats;
   try {
     let noticeRes;
     let maintRes;
-    [users, messages, access, noticeRes, maintRes] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages'), api('/api/admin/apps'), api('/api/admin/notice'), api('/api/admin/maintenance')]);
+    [users, messages, access, noticeRes, maintRes, stats] = await Promise.all([api('/api/admin/users'), api('/api/admin/messages'), api('/api/admin/apps'), api('/api/admin/notice'), api('/api/admin/maintenance'), api('/api/admin/stats').catch(() => null)]);
     notice = noticeRes.notice;
     maint = maintRes.maintenance;
   } catch (err) {
@@ -1539,7 +1540,34 @@ async function renderAdmin(token) {
           ? el('ul', { class: 'admin-list' }, ...list.map(userRow))
           : el('p', { class: 'admin-empty', text: status === 'pending' ? '기다리는 사람이 없어요.' : '없음' }));
     });
-    body.replaceChildren(maintenanceSection(), onlineSection(), inbox, noticeSection(), appAccessSection(), ...sections);
+    body.replaceChildren(maintenanceSection(), statsSection(), onlineSection(), inbox, noticeSection(), appAccessSection(), ...sections);
+  }
+
+  // 사용량: 날짜별 요청 수 (Cloudflare 무료 한도를 가늠하라고). 사람 수 집계도 같이 보여 준다.
+  function statsSection() {
+    const approved = users.filter((u) => u.status === 'approved').length;
+    const pending = users.filter((u) => u.status === 'pending').length;
+    const blocked = users.filter((u) => u.status === 'blocked').length;
+    const now = Date.now();
+    const today = new Date(now + 9 * 3600000).toISOString().slice(0, 10);
+    const activeToday = users.filter((u) => u.lastSeen && new Date(u.lastSeen + 9 * 3600000).toISOString().slice(0, 10) === today).length;
+    const days = stats?.days || [];
+    const max = Math.max(1, ...days.map((d) => d.count));
+    const todayCount = days.length ? days[days.length - 1].count : 0;
+    const tiles = el('div', { class: 'stat-tiles' },
+      el('div', { class: 'stat-tile' }, el('b', { text: todayCount.toLocaleString('ko-KR') }), el('span', { text: '오늘 요청' })),
+      el('div', { class: 'stat-tile' }, el('b', { text: String(activeToday) }), el('span', { text: '오늘 쓴 사람' })),
+      el('div', { class: 'stat-tile' }, el('b', { text: String(approved) }), el('span', { text: '승인된 사람' })),
+      el('div', { class: 'stat-tile' }, el('b', { text: String(pending) }), el('span', { text: '승인 대기' })),
+      el('div', { class: 'stat-tile' }, el('b', { text: String(blocked) }), el('span', { text: '차단됨' })));
+    const chart = el('div', { class: 'stat-bars' }, ...days.map((d) => el('div', { class: 'stat-bar' },
+      el('div', { class: 'stat-bar-fill', style: `height:${Math.round((d.count / max) * 100)}%`, title: `${d.date}: ${d.count.toLocaleString('ko-KR')}` }),
+      el('span', { class: 'stat-bar-day', text: d.date.slice(4, 6) + '.' + d.date.slice(6, 8) }))));
+    return el('section', { class: 'admin-section' },
+      el('h2', { text: '사용량' }),
+      el('p', { class: 'admin-empty', text: stats ? 'Cloudflare 무료 플랜은 하루 요청 10만 번·KV 쓰기 1000번까지예요. 요청 수가 그 근처면 조심하세요. (약 10분마다 모아 세서 조금 적게 보일 수 있어요)' : '사용량을 못 불러왔어요.' }),
+      tiles,
+      days.length ? el('div', {}, el('p', { class: 'admin-empty', text: '최근 7일 요청 수' }), chart) : null);
   }
 
   // 앱 보이기: 앱마다 모두 / 선택한 사람만 / 아무도 안 보임 (관리자는 언제나 다 보임)

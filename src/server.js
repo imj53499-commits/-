@@ -6,6 +6,7 @@ import { handleNotice } from './notice.js';
 import { handleWatch } from './watch.js';
 import { handleFriends } from './friends.js';
 import { loadMaintenance, maintenanceResponse, handleMaintenanceAdmin } from './maintenance.js';
+import { bumpRequest, handleStats } from './stats.js';
 
 // /api/* 요청의 입구. 계정 관련 요청은 auth 로, 나머지(영상 API)는 승인된 사용자만 쓸 수 있다.
 // 로그인 없이는 아무것도 못 쓴다. KV 저장소(DB)를 연결하지 않았으면 로그인을 할 수 없으니 전부 막는다.
@@ -13,6 +14,8 @@ export async function handleRequest(request, env, yt) {
   const url = new URL(request.url);
   const isAuth = url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/admin/');
   if (!env.DB) return json({ error: '로그인 기능이 아직 설정되지 않았어요. (KV 저장소 DB 연결 필요)', code: 'NO_DB' }, 503);
+  // 사용량 통계용으로 요청 수를 센다 (10분에 한 번만 KV 에 모아서 적음)
+  await bumpRequest(env);
   // 차단된 기기는 관리자 화면과 문의하기 말고는 아무것도 못 쓴다.
   const allowed = url.pathname.startsWith('/api/admin/') || url.pathname.startsWith('/api/auth/contact');
   if (!allowed) {
@@ -23,6 +26,12 @@ export async function handleRequest(request, env, yt) {
   if (!url.pathname.startsWith('/api/admin/') && !url.pathname.startsWith('/api/auth/contact')) {
     const maintenance = await loadMaintenance(env);
     if (maintenance?.on && (await getSession(request, env))?.role !== 'admin') return maintenanceResponse(maintenance);
+  }
+  // 사용량 통계 (관리자만)
+  if (url.pathname === '/api/admin/stats') {
+    const s = await getSession(request, env);
+    if (s?.role !== 'admin') return json({ error: '관리자 로그인이 필요해요.', code: 'ADMIN_REQUIRED' }, 401);
+    return handleStats(request, env, s);
   }
   // 점검 켜기·끄기 (관리자만)
   if (url.pathname === '/api/admin/maintenance') {
