@@ -2423,8 +2423,19 @@ let jump = loadJump();
 if (touchOnly) document.body.classList.add('touch-device'); // 설정 창의 단축키 칸도 숨김
 let pickingJumpKey = false; // 이동 단축키를 고르는 중에는 다른 단축키가 동작하지 않게
 
+// 두 단축키가 같은 키인지 (조합 키까지)
+function sameShortcut(a, b) {
+  return !!a && !!b && a.code === b.code && !!a.ctrl === !!b.ctrl && !!a.alt === !!b.alt && !!a.shift === !!b.shift && !!a.meta === !!b.meta;
+}
+
+// 이동 단축키를 아직 안 정했거나, 화면 가리기 단축키와 겹치면 다시 정해야 한다
+// (가리기가 잠깐 없어졌던 동안 ` 키를 이동 단축키로 정한 경우)
+function jumpClashesWithCover() {
+  return !!jump && sameShortcut(jump.shortcut, coverShortcut);
+}
+
 function needsJumpSetup() {
-  return !jump && !touchOnly;
+  return !touchOnly && (!jump || jumpClashesWithCover());
 }
 
 function jumpAway() {
@@ -2466,7 +2477,8 @@ function renderJumpSetup(token, next) {
   setActiveNav('');
   document.body.classList.add('app-mode');
   appTitle.textContent = '';
-  let picked = jump?.shortcut || null;
+  const clash = jumpClashesWithCover();
+  let picked = clash ? null : jump?.shortcut || null;
   let listening = false;
   const setListening = (on) => {
     listening = on;
@@ -2496,7 +2508,8 @@ function renderJumpSetup(token, next) {
   }
   showChoice();
   const keyBtn = el('button', { type: 'button', class: 'jump-key' });
-  const message = el('p', { class: 'auth-message', role: 'alert' });
+  const message = el('p', { class: `auth-message${clash ? ' wait' : ''}`, role: 'alert',
+    text: clash ? `이동 단축키(${shortcutLabel(jump.shortcut)})가 화면 가리기 단축키와 같아서, 누르면 두 개가 같이 됐어요. 이동 단축키를 다른 키로 다시 정해 주세요.` : '' });
   const showKey = () => {
     keyBtn.textContent = listening ? '원하는 키를 누르세요…' : picked ? shortcutLabel(picked) : '눌러서 키 정하기';
     keyBtn.classList.toggle('recording', listening);
@@ -2602,6 +2615,7 @@ let recordingFor = null; // 키를 기다리는 중인 설정 줄
 window.addEventListener('keydown', (e) => {
   if (recordingFor || pickingJumpKey) return;
   if (!matchesShortcut(e, coverShortcut)) return;
+  if (jump && !touchOnly && matchesShortcut(e, jump.shortcut)) return; // 겹치면 이동만 (두 개가 같이 되지 않게)
   if (isTypingKey(coverShortcut) && isTypingTarget(e.target)) return;
   e.preventDefault();
   toggleCover();
@@ -2649,7 +2663,14 @@ function recordKey(e) {
   if (MODIFIER_CODES.test(e.code) || !e.code) return; // Ctrl 같은 키만 누른 상태면 다음 키를 기다린다
   e.preventDefault();
   e.stopPropagation();
-  shortcutRows[recordingFor].set(shortcutFromEvent(e));
+  const sc = shortcutFromEvent(e);
+  // 이동 단축키와 같은 키는 못 정한다 (누르면 두 개가 같이 되니까)
+  if (jump && sameShortcut(sc, jump.shortcut)) {
+    stopRecording();
+    alert(`${shortcutLabel(sc)} 는 이동 단축키라서 쓸 수 없어요. 다른 키를 정해 주세요.`);
+    return;
+  }
+  shortcutRows[recordingFor].set(sc);
   stopRecording();
   updateShortcutLabels();
 }
@@ -2664,7 +2685,15 @@ for (const [name, row] of Object.entries(shortcutRows)) {
     row.change.classList.add('recording');
     window.addEventListener('keydown', recordKey, true);
   });
-  document.getElementById(row.reset).addEventListener('click', () => { stopRecording(); row.set(row.fallback); updateShortcutLabels(); });
+  document.getElementById(row.reset).addEventListener('click', () => {
+    stopRecording();
+    if (jump && sameShortcut(row.fallback, jump.shortcut)) {
+      alert(`${shortcutLabel(row.fallback)} 는 이동 단축키라서 기본값으로 못 돌려요. 이동 단축키를 먼저 바꿔 주세요.`);
+      return;
+    }
+    row.set(row.fallback);
+    updateShortcutLabels();
+  });
   document.getElementById(row.off).addEventListener('click', () => { stopRecording(); row.set(null); updateShortcutLabels(); });
 }
 
