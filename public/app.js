@@ -862,7 +862,11 @@ const ICONS = {
   eye: '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   eyeOff: '<svg viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.1 4M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.6 0 3-.4 4.3-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
-  mail: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>'
+  mail: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>',
+  book: '<svg viewBox="0 0 24 24"><path d="M3 5.5c2.6-.9 5.4-.8 8 .7v13c-2.6-1.5-5.4-1.6-8-.7zM21 5.5c-2.6-.9-5.4-.8-8 .7v13c2.6-1.5 5.4-1.6 8-.7z"/></svg>',
+  clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.9 4.5"/><path d="M20 5v6h-6"/></svg>',
+  theme: '<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>'
 };
 
 function icon(name, cls = 'auth-icon') {
@@ -957,7 +961,49 @@ const RULES = {
   password: (v) => v.length >= 6 && v.length <= 100
 };
 
-function renderAuth(token, mode = 'login', notice = '', prefill = '') {
+// 공부 사이트 입구(로그아웃 상태): 위에 로그인/회원가입 버튼, 아래 공부 소개.
+// 버튼을 누르면 창(모달)이 뜨고, 로그인에 성공하면 그대로 앱(goodle.kro.kr)으로 들어간다.
+function studyFeature(iconName, title, text) {
+  return el('div', { class: 'study-card' },
+    icon(iconName, 'study-card-ic'),
+    el('h3', { class: 'study-card-title', text: title }),
+    el('p', { class: 'study-card-text', text }));
+}
+
+function studyLanding(open) {
+  const themeBtn = el('button', { type: 'button', class: 'study-theme', 'aria-label': '테마 전환',
+    onclick: () => {
+      const current = document.documentElement.dataset.theme ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      const next = current === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try { localStorage.setItem('theme', next); } catch {}
+    } });
+  themeBtn.innerHTML = ICONS.theme;
+
+  return el('div', { class: 'study' },
+    el('header', { class: 'study-top' },
+      el('div', { class: 'study-brand' }, icon('book', 'study-mark'), el('span', { class: 'study-brand-name', text: '매일공부' })),
+      el('div', { class: 'study-top-actions' },
+        themeBtn,
+        el('button', { type: 'button', class: 'study-btn ghost', text: '로그인', onclick: () => open('login') }),
+        el('button', { type: 'button', class: 'study-btn solid', text: '회원가입', onclick: () => open('signup') }))),
+    el('main', { class: 'study-main' },
+      el('section', { class: 'study-hero' },
+        el('p', { class: 'study-eyebrow', text: '하루 25분 집중 학습' }),
+        el('h1', { class: 'study-h1', text: '오늘의 공부, 딱 한 걸음만 더.' }),
+        el('p', { class: 'study-lede', text: '계획 세우기, 집중 타이머, 복습 체크까지. 흩어진 공부 습관을 한곳에 모아 매일 조금씩 쌓아가세요.' }),
+        el('div', { class: 'study-cta' },
+          el('button', { type: 'button', class: 'study-btn solid lg', text: '무료로 시작하기', onclick: () => open('signup') }),
+          el('button', { type: 'button', class: 'study-btn ghost lg', text: '이미 계정이 있어요', onclick: () => open('login') }))),
+      el('section', { class: 'study-feat' },
+        studyFeature('clock', '집중 타이머', '25분 집중 + 5분 휴식. 뽀모도로 리듬으로 흐트러지지 않게 이어가요.'),
+        studyFeature('check', '할 일 체크', '오늘 끝낼 분량을 과목별로 쪼개 적고 하나씩 지워가며 성취감을 쌓아요.'),
+        studyFeature('refresh', '복습 알림', '망각곡선에 맞춰 1일·3일·7일 뒤 복습할 내용을 다시 꺼내 보여줘요.'))),
+    el('footer', { class: 'study-foot', text: '© 2026 매일공부 · 꾸준함이 가장 빠른 길입니다.' }));
+}
+
+function renderAuth(token, mode = 'login', notice = '', prefill = '', open = false) {
   setTitle();
   setActiveNav('');
   const signup = mode === 'signup';
@@ -978,7 +1024,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
   const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: signup ? '가입 신청하기' : '로그인' }));
   const tab = (key, label) => el('button', {
     type: 'button', class: `auth-tab${mode === key ? ' active' : ''}`, text: label, 'aria-pressed': String(mode === key),
-    onclick: () => { if (mode !== key) renderAuth(token, key, '', username.value.trim()); }
+    onclick: () => { if (mode !== key) renderAuth(token, key, '', username.value.trim(), true); }
   });
 
   const form = el('form', { class: 'auth-form', novalidate: '' },
@@ -1038,10 +1084,26 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '') {
     }
   });
 
-  app.replaceChildren(authCard('School', signup ? '가입 신청을 하면 관리자가 확인해요' : '다시 오신 걸 환영해요',
+  // 창을 열고 닫는 건 모드를 유지한 채 다시 그려서 처리한다.
+  const openModal = (m) => renderAuth(token, m, '', username.value.trim(), true);
+  const closeModal = () => renderAuth(token, mode, '', username.value.trim(), false);
+  // 안내(가입 완료 후 안내문)나 로그인 알림(다른 기기 로그인 등)이 있으면 자동으로 창을 연다.
+  const shouldOpen = open || !!notice || !!loginNotice;
+
+  const closeX = el('button', { type: 'button', class: 'study-x', 'aria-label': '닫기', text: '×', onclick: closeModal });
+  const modal = el('div', { class: 'study-modal', role: 'dialog', 'aria-modal': 'true' },
+    closeX,
+    el('div', { class: 'auth-head' },
+      el('span', { class: 'auth-logo', 'aria-hidden': 'true' }),
+      el('h1', { class: 'auth-title', text: signup ? '함께 시작해요' : '다시 오셨네요' }),
+      el('p', { class: 'auth-subtitle', text: signup ? '계정을 만들면 관리자 승인 후 바로 쓸 수 있어요' : '로그인하고 이어서 공부해요' })),
     el('div', { class: `auth-tabs${signup ? ' signup' : ''}` }, tab('login', '로그인'), tab('signup', '가입하기')),
-    form));
-  (signup ? realName : (prefill ? password : username)).focus();
+    form);
+  const overlay = el('div', { class: 'study-overlay', onclick: (e) => { if (e.target === overlay) closeModal(); } }, modal);
+  if (!shouldOpen) overlay.hidden = true;
+
+  app.replaceChildren(studyLanding(openModal), overlay);
+  if (shouldOpen) (signup ? realName : (prefill ? password : username)).focus();
   showReplyBanner(token);
 }
 
