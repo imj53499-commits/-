@@ -527,3 +527,24 @@ test('비밀번호를 바꾸면 옛 비밀번호로는 로그인이 안 되고 �
   const s2 = await call('/api/auth/login', { method: 'POST', body: { password: 'second-pass-456' } });
   assert.equal(s2.body.username, u.body.number);
 });
+
+test('색인 없는 기존 계정도 비밀번호만으로 로그인되고, 그때 색인이 생긴다', async () => {
+  // 옛 방식 계정을 직접 넣는다 (pwIdx 없음, 아이디는 사람이 고른 것)
+  const salt = 'oldsalt';
+  const hash = await hashPassword('old-account-pw-9', salt);
+  env.DB.store.set('user:oldie', { value: JSON.stringify({ username: 'oldie', name: '옛사람', salt, hash, status: 'approved', pwv: 0 }), metadata: { username: 'oldie', name: '옛사람', status: 'approved', createdAt: 1 } });
+  // pw: 색인은 아직 없다
+  const { keys: before } = await env.DB.list({ prefix: 'pw:' });
+  assert.equal(before.length, 0);
+  // 비밀번호만으로 로그인된다
+  const r = await call('/api/auth/login', { method: 'POST', body: { password: 'old-account-pw-9' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.username, 'oldie');
+  // 로그인하면서 색인이 생긴다 → 다음에도 됨
+  const { keys: after } = await env.DB.list({ prefix: 'pw:' });
+  assert.equal(after.length, 1);
+  const r2 = await call('/api/auth/login', { method: 'POST', body: { password: 'old-account-pw-9' } });
+  assert.equal(r2.body.username, 'oldie');
+  // 틀린 비밀번호는 여전히 실패
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: { password: 'definitely-wrong' } })).status, 401);
+});

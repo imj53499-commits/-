@@ -333,6 +333,44 @@ async function loginOk(env, kind, ip) {
   await env.DB.delete(`rl:${kind}:${ip}`);
 }
 
+// 비밀번호로 계정을 찾는다. 먼저 '비밀번호→아이디' 색인(빠름)을 보고, 없으면(색인 없는 기존 계정)
+// 계정들을 하나씩 대조해서 찾고, 찾으면 그 자리에서 색인을 만들어 둔다(다음부터는 색인으로 바로 찾음).
+const SCAN_CAP = 500; // 계정이 이보다 많으면 대조는 건너뛴다 (비용·악용 방지, 그땐 색인/초기화로만)
+
+async function findUserByPassword(env, password) {
+  if (!password) return null;
+  // 1) 색인으로 바로 찾기
+  const mapped = await env.DB.get(await pwKey(password));
+  if (mapped) {
+    const user = await env.DB.get(userKey(mapped), 'json');
+    if (user && safeEqual(await hashPassword(password, user.salt), user.hash)) return user;
+    if (user) return null; // 색인이 낡았으면(비번 바뀜) 실패로
+  }
+  // 2) 색인에 없으면(기존 계정) 대조로 찾고, 찾으면 색인을 만들어 둔다
+  let cursor;
+  let scanned = 0;
+  do {
+    const page = await env.DB.list({ prefix: 'user:', cursor });
+    for (const key of page.keys) {
+      if (++scanned > SCAN_CAP) return null;
+      const user = await env.DB.get(key.name, 'json');
+      if (!user || !user.salt || !user.hash) continue;
+      if (safeEqual(await hashPassword(password, user.salt), user.hash)) {
+        // 찾음: 색인을 만들어 둔다 (다음부턴 바로 찾게). 이미 다른 계정이 그 색인을 쓰면 건드리지 않는다.
+        const key2 = await pwKey(password);
+        if (!(await env.DB.get(key2))) {
+          user.pwIdx = key2;
+          await env.DB.put(key2, user.username);
+          await putUser(env, user);
+        }
+        return user;
+      }
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return null;
+}
+
 async function login(request, env) {
   const ip = clientIp(request);
   const blocked = await loginThrottle(env, 'login', ip);
@@ -345,13 +383,14 @@ async function login(request, env) {
   let user = null;
   if (username && USERNAME.test(username)) {
     user = await env.DB.get(userKey(username), 'json');
+    const hash = await hashPassword(password, user?.salt || 'no-user');
+    if (!user || !safeEqual(hash, user.hash)) user = null;
   } else if (password) {
-    const mapped = await env.DB.get(await pwKey(password));
-    if (mapped) user = await env.DB.get(userKey(mapped), 'json');
+    user = await findUserByPassword(env, password);
   }
-  // 아이디가 없을 때도 똑같이 계산해서, 응답 시간으로 계정 존재 여부를 알 수 없게 한다.
-  const hash = await hashPassword(password, user?.salt || 'no-user');
-  if (!user || !safeEqual(hash, user.hash)) {
+  if (!user) {
+    // 응답 시간으로 계정 존재 여부를 알 수 없게 한 번 더 계산한다
+    await hashPassword(password, 'no-user');
     await loginFailed(env, 'login', ip);
     return fail('비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
   }
