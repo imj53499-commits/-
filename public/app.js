@@ -1007,12 +1007,6 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
   setTitle();
   setActiveNav('');
   const signup = mode === 'signup';
-  // 로그인은 고유번호로 한다 (가입 때는 안 받고 서버가 만들어 준다).
-  const username = el('input', {
-    name: 'username', inputmode: 'numeric', required: '', maxlength: '20', autocapitalize: 'off', spellcheck: 'false',
-    autocomplete: 'off', placeholder: '고유번호'
-  });
-  username.value = prefill;
   const password = el('input', {
     name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
     autocomplete: signup ? 'new-password' : 'current-password', placeholder: signup ? '6자 이상' : '비밀번호'
@@ -1023,15 +1017,14 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
   const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: signup ? '가입 신청하기' : '로그인' }));
   const tab = (key, label) => el('button', {
     type: 'button', class: `auth-tab${mode === key ? ' active' : ''}`, text: label, 'aria-pressed': String(mode === key),
-    onclick: () => { if (mode !== key) renderAuth(token, key, '', username.value.trim(), true); }
+    onclick: () => { if (mode !== key) renderAuth(token, key, '', '', true); }
   });
 
   const form = el('form', { class: 'auth-form', novalidate: '' },
-    signup ? null : field('고유번호', username, 'id', {}),
-    field('비밀번호', password, 'lock', signup ? { hint: '6자 이상 · 이름·아이디 없이 비밀번호만 정하면 돼요', check: RULES.password } : {}),
+    field('비밀번호', password, 'lock', signup ? { hint: '6자 이상 · 이름·아이디 없이 비밀번호만 정하면 돼요', check: RULES.password } : { hint: '비밀번호만 넣으면 로그인돼요' }),
     message,
     submit,
-    el('p', { class: 'auth-foot', text: signup ? '이름·아이디·이메일 필요 없어요 · 가입하면 고유번호가 나와요 (꼭 기억!)' : '처음이라면 위에서 가입하기를 눌러 주세요' }),
+    el('p', { class: 'auth-foot', text: signup ? '이름·아이디·이메일 필요 없어요 · 가입하면 고유번호가 나와요 (꼭 기억!)' : '비밀번호만 넣으면 돼요 · 처음이면 위에서 가입하기' }),
     el('a', { class: 'auth-link', href: '#/contact', text: signup ? '가입이 안 되나요? 관리자에게 문의하기' : '비밀번호를 잊었나요? 관리자에게 문의하기' }));
 
   // 다시 입력하기 시작하면 이전 오류 문구는 지운다 (안내/승인 대기 문구는 남겨 둔다)
@@ -1043,7 +1036,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
     e.preventDefault();
     message.className = 'auth-message';
     message.textContent = '';
-    const body = signup ? { password: password.value } : { username: username.value.trim(), password: password.value };
+    const body = { password: password.value };
     // 형식이 틀린 칸이 있으면 서버에 보내기 전에 알려 준다
     if (signup) {
       if (!RULES.password(password.value)) {
@@ -1052,9 +1045,9 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
         password.focus();
         return;
       }
-    } else if (!body.username || !body.password) {
-      message.textContent = '고유번호와 비밀번호를 입력해 주세요.';
-      (body.username ? password : username).focus();
+    } else if (!body.password) {
+      message.textContent = '비밀번호를 입력해 주세요.';
+      password.focus();
       return;
     }
     submit.disabled = true;
@@ -1080,8 +1073,8 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
   });
 
   // 창을 열고 닫는 건 모드를 유지한 채 다시 그려서 처리한다.
-  const openModal = (m) => renderAuth(token, m, '', username.value.trim(), true);
-  const closeModal = () => renderAuth(token, mode, '', username.value.trim(), false);
+  const openModal = (m) => renderAuth(token, m, '', '', true);
+  const closeModal = () => renderAuth(token, mode, '', '', false);
   // 안내(가입 완료 후 안내문)나 로그인 알림(다른 기기 로그인 등)이 있으면 자동으로 창을 연다.
   const shouldOpen = open || !!notice || !!loginNotice;
 
@@ -1098,7 +1091,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
   if (!shouldOpen) overlay.hidden = true;
 
   app.replaceChildren(studyLanding(openModal), overlay);
-  if (shouldOpen) (signup ? password : (prefill ? password : username)).focus();
+  if (shouldOpen) password.focus();
   showReplyBanner(token);
 }
 

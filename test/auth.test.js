@@ -492,3 +492,38 @@ test('관리자 로그인을 여러 번 틀리면 잠깐 막힌다', async () =>
   const other = await handleRequest(new Request('https://site.test/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', 'CF-Connecting-IP': '9.9.9.9' }, body: JSON.stringify({ password: 'admin-secret' }) }), env, {});
   assert.equal(other.status, 200);
 });
+
+test('비밀번호만으로 로그인된다 (비밀번호가 곧 계정)', async () => {
+  const a = await adminLogin();
+  // 두 명이 각각 다른 비밀번호로 가입
+  const u1 = await call('/api/auth/signup', { method: 'POST', body: { password: 'alpha-secret-1' } });
+  const u2 = await call('/api/auth/signup', { method: 'POST', body: { password: 'beta-secret-2' } });
+  assert.equal(u1.status, 201);
+  // 같은 비밀번호로는 가입 못 한다
+  assert.equal((await call('/api/auth/signup', { method: 'POST', body: { password: 'alpha-secret-1' } })).status, 409);
+  await admin('approve', u1.body.number, a.cookie);
+  await admin('approve', u2.body.number, a.cookie);
+  // 번호 없이 비밀번호만으로 로그인 → 그 비밀번호 주인으로 로그인된다
+  const login1 = await call('/api/auth/login', { method: 'POST', body: { password: 'alpha-secret-1' } });
+  assert.equal(login1.status, 200);
+  assert.equal(login1.body.username, u1.body.number);
+  const login2 = await call('/api/auth/login', { method: 'POST', body: { password: 'beta-secret-2' } });
+  assert.equal(login2.body.username, u2.body.number);
+  // 틀린 비밀번호는 실패
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: { password: 'nope-nope-nope' } })).status, 401);
+});
+
+test('비밀번호를 바꾸면 옛 비밀번호로는 로그인이 안 되고 새 비밀번호로 된다', async () => {
+  const a = await adminLogin();
+  const u = await call('/api/auth/signup', { method: 'POST', body: { password: 'first-pass-123' } });
+  await admin('approve', u.body.number, a.cookie);
+  const s1 = await call('/api/auth/login', { method: 'POST', body: { password: 'first-pass-123' } });
+  assert.equal(s1.status, 200);
+  // 비밀번호 바꾸기
+  const ch = await call('/api/auth/password', { method: 'POST', body: { current: 'first-pass-123', next: 'second-pass-456' }, cookie: s1.cookie });
+  assert.equal(ch.status, 200);
+  // 옛 비밀번호로는 못 들어오고(아무 계정도 아님), 새 비밀번호로 들어온다
+  assert.equal((await call('/api/auth/login', { method: 'POST', body: { password: 'first-pass-123' } })).status, 401);
+  const s2 = await call('/api/auth/login', { method: 'POST', body: { password: 'second-pass-456' } });
+  assert.equal(s2.body.username, u.body.number);
+});

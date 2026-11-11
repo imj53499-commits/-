@@ -151,10 +151,22 @@ async function putUser(env, user) {
   });
 }
 
-async function setPassword(user, password) {
+// 비밀번호로 계정을 찾기 위한 색인 키. 비밀번호만으로 로그인하려고 둔다.
+// 고정 양념(pepper)으로 해시해서, KV 를 통째로 봐도 짧은 비밀번호를 쉽게 되맞추지 못하게 한다.
+const PW_PEPPER = 'sy-pw-index-v1';
+async function pwKey(password) {
+  return `pw:${await sha256Hex(`${PW_PEPPER}\n${password}`)}`;
+}
+
+// 비밀번호를 정하고(해시), '비밀번호→아이디' 색인도 옮긴다. username 은 미리 정해져 있어야 한다.
+async function setPassword(env, user, password) {
+  const key = await pwKey(password);
+  if (user.pwIdx && user.pwIdx !== key) await env.DB.delete(user.pwIdx); // 예전 비밀번호 색인 지우기
   user.salt = randomHex(16);
   user.hash = await hashPassword(password, user.salt);
   user.pwv = (user.pwv || 0) + 1;
+  user.pwIdx = key;
+  await env.DB.put(key, user.username);
 }
 
 const TEMP_PASSWORD_TTL = 24 * 60 * 60 * 1000; // 임시 비밀번호는 24시간 안에 써야 한다
@@ -163,7 +175,7 @@ const TICKET_TTL = 60 * 60 * 24 * 30;
 // 비밀번호를 임시 비밀번호로 바꾸고(예전 로그인은 풀림) 그 임시 비밀번호를 돌려준다.
 async function resetToTemp(env, user) {
   const temp = tempPassword();
-  await setPassword(user, temp);
+  await setPassword(env, user, temp);
   user.mustChange = true;
   user.tempExpires = Date.now() + TEMP_PASSWORD_TTL;
   await putUser(env, user);
@@ -273,7 +285,9 @@ async function signup(request, env) {
   const body = await readJson(request);
   const password = String(body?.password ?? '');
   if (password.length < 6 || password.length > 100) return fail('비밀번호는 6자 이상으로 정해 주세요.', 400);
-  // 이름·아이디 없이 고유번호(6자리)로 계정을 만든다. 겹치면 다시 뽑는다.
+  // 비밀번호만으로 로그인하므로, 이미 쓰는 비밀번호는 못 쓴다
+  if (await env.DB.get(await pwKey(password))) return fail('그 비밀번호는 이미 쓰고 있어요. 다른 비밀번호로 정해 주세요.', 409, 'PW_TAKEN');
+  // 이름·아이디 없이 고유번호(6자리)로 계정을 만든다 (복구용). 겹치면 다시 뽑는다.
   let username = '';
   for (let i = 0; i < 15; i++) {
     const n = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
@@ -281,11 +295,11 @@ async function signup(request, env) {
   }
   if (!username) return fail('잠시 뒤 다시 시도해 주세요.', 503);
 
-  const salt = randomHex(16);
   const createdAt = Date.now();
-  const user = { username, name: '', salt, hash: await hashPassword(password, salt), status: 'pending', createdAt };
+  const user = { username, name: '', status: 'pending', createdAt };
+  await setPassword(env, user, password); // 해시 + 비밀번호 색인
   await putUser(env, user);
-  // 고유번호를 돌려줘서 사용자가 기억하게 한다
+  // 고유번호를 돌려줘서 사용자가 기억하게 한다 (복구용)
   return json({ ok: true, status: 'pending', number: username }, 201);
 }
 
@@ -324,14 +338,22 @@ async function login(request, env) {
   const blocked = await loginThrottle(env, 'login', ip);
   if (blocked) return blocked;
   const body = await readJson(request);
-  const username = String(body?.username ?? '').trim();
   const password = String(body?.password ?? '');
-  const user = USERNAME.test(username) ? await env.DB.get(userKey(username), 'json') : null;
-  // 아이디가 없을 때도 똑같이 계산해서, 응답 시간으로 아이디 존재 여부를 알 수 없게 한다.
+  // 비밀번호만으로 로그인한다. 비밀번호로 계정을 찾고(색인), 찾은 계정의 해시로 한 번 더 확인한다.
+  // (예전 방식처럼 username 을 같이 보내면 그 계정으로도 찾는다 — 기존 계정 호환)
+  const username = String(body?.username ?? '').trim();
+  let user = null;
+  if (username && USERNAME.test(username)) {
+    user = await env.DB.get(userKey(username), 'json');
+  } else if (password) {
+    const mapped = await env.DB.get(await pwKey(password));
+    if (mapped) user = await env.DB.get(userKey(mapped), 'json');
+  }
+  // 아이디가 없을 때도 똑같이 계산해서, 응답 시간으로 계정 존재 여부를 알 수 없게 한다.
   const hash = await hashPassword(password, user?.salt || 'no-user');
   if (!user || !safeEqual(hash, user.hash)) {
     await loginFailed(env, 'login', ip);
-    return fail('아이디 또는 비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
+    return fail('비밀번호가 맞지 않아요.', 401, 'BAD_LOGIN');
   }
   if (user.mustChange && user.tempExpires && Date.now() > user.tempExpires) {
     return fail('임시 비밀번호가 만료됐어요. 관리자에게 다시 문의해 주세요.', 401, 'TEMP_EXPIRED');
@@ -357,7 +379,9 @@ async function changePassword(request, env) {
   if (!user || !safeEqual(await hashPassword(current, user.salt), user.hash)) return fail('지금 비밀번호가 맞지 않아요.', 400, 'BAD_PASSWORD');
   if (next.length < 6 || next.length > 100) return fail('새 비밀번호는 6자 이상으로 정해 주세요.', 400);
   if (next === current) return fail('지금과 다른 비밀번호로 정해 주세요.', 400);
-  await setPassword(user, next);
+  const takenBy = await env.DB.get(await pwKey(next));
+  if (takenBy && takenBy !== user.username) return fail('그 비밀번호는 다른 사람이 쓰고 있어요. 다른 걸로 정해 주세요.', 409, 'PW_TAKEN');
+  await setPassword(env, user, next);
   user.mustChange = false;
   delete user.tempExpires;
   // 다른 기기의 로그인은 풀리고, 지금 기기는 새로 로그인된 상태로 둔다.
