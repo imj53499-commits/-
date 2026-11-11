@@ -2,6 +2,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleRequest } from '../src/server.js';
 import { clearCache } from '../src/api.js';
+import { hashPassword } from '../src/auth.js';
 
 // Cloudflare KV 와 같은 동작을 하는 가짜 저장소 (get/put/delete/list + metadata)
 function fakeKV() {
@@ -47,7 +48,15 @@ async function call(path, { method = 'GET', body, cookie, contentType = 'applica
   return { status: res.status, body: await res.json(), cookie: setCookie ? setCookie.split(';')[0] : null, setCookie };
 }
 
-const signup = (username, password = 'pass1234', name = '홍길동') => call('/api/auth/signup', { method: 'POST', body: { username, password, name } });
+// 테스트 fixture: 고른 아이디로 '승인 대기' 계정을 바로 넣는다 (실제 가입 엔드포인트는 고유번호를 만들어서,
+// 뒤따르는 테스트들이 특정 아이디로 로그인·승인하려면 이렇게 직접 넣는 게 편하다). 로그인은 진짜 해시로 되게 한다.
+async function signup(username, password = 'pass1234', name = '홍길동') {
+  const salt = 'ts-' + username.toLowerCase();
+  const hash = await hashPassword(password, salt);
+  const user = { username, name, salt, hash, status: 'pending', createdAt: Date.now() };
+  env.DB.store.set(`user:${username.toLowerCase()}`, { value: JSON.stringify(user), metadata: { username, name, status: 'pending', createdAt: user.createdAt, blockReason: '' } });
+  return { status: 201 };
+}
 const login = (username, password = 'pass1234') => call('/api/auth/login', { method: 'POST', body: { username, password } });
 const adminLogin = (password = 'admin-secret') => call('/api/admin/login', { method: 'POST', body: { password } });
 const admin = async (action, username, cookie) => call('/api/admin/users', { method: 'POST', body: { action, username }, cookie });
@@ -61,7 +70,6 @@ test('로그인 안 하면 영상 API 를 쓸 수 없다', async () => {
 
 test('가입 → 승인 대기 → 관리자 승인 → 로그인 → 영상 API 사용', async () => {
   assert.equal((await signup('민수')).status, 201);
-  assert.equal((await signup('민수')).status, 409);
 
   const pending = await login('민수');
   assert.equal(pending.status, 403);
@@ -101,7 +109,6 @@ test('비밀번호가 틀리면 로그인 실패, 아이디 대소문자는 구�
   assert.equal((await login('Tom', 'wrong-pass')).status, 401);
   assert.equal((await login('nobody')).status, 401);
   assert.equal((await login('TOM')).status, 200);
-  assert.equal((await signup('tom')).status, 409);
 });
 
 test('비밀번호는 그대로 저장하지 않는다', async () => {
@@ -111,21 +118,25 @@ test('비밀번호는 그대로 저장하지 않는다', async () => {
   assert.equal(JSON.parse(raw).hash.length, 64);
 });
 
-test('가입 입력값 검사', async () => {
-  assert.equal((await signup('a')).status, 400);
-  assert.equal((await signup('공백 있음')).status, 400);
-  assert.equal((await signup('<script>')).status, 400);
-  assert.equal((await signup('okname', '123')).status, 400);
-  // 본인 이름은 꼭 적어야 하고, 글자와 띄어쓰기만 된다
-  assert.equal((await signup('noname', 'pass1234', '')).status, 400);
-  assert.equal((await signup('noname', 'pass1234', '   ')).status, 400);
-  assert.equal((await signup('noname', 'pass1234', '<b>김</b>')).status, 400);
-  assert.equal((await signup('noname', 'pass1234', '가'.repeat(21))).status, 400);
-  assert.equal((await signup('engname', 'pass1234', '  Kim   Min-su ')).status, 201);
-  assert.equal(JSON.parse(env.DB.store.get('user:engname').value).name, 'Kim Min-su');
+test('가입: 비밀번호만 받고 고유번호를 만들어 준다', async () => {
+  // 비밀번호가 짧으면 거절
+  assert.equal((await call('/api/auth/signup', { method: 'POST', body: { password: '123' } })).status, 400);
+  // 비밀번호만 있으면 가입되고, 6자리 고유번호를 돌려준다
+  const ok = await call('/api/auth/signup', { method: 'POST', body: { password: 'pass1234' } });
+  assert.equal(ok.status, 201);
+  assert.match(String(ok.body.number), /^\d{6}$/);
+  // 그 번호로 승인·로그인이 된다 (이름은 비어 있다)
+  const a = await adminLogin();
+  await admin('approve', ok.body.number, a.cookie);
+  const login2 = await call('/api/auth/login', { method: 'POST', body: { username: ok.body.number, password: 'pass1234' } });
+  assert.equal(login2.status, 200);
+  assert.equal(login2.body.name, '');
+  // 두 번 가입하면 서로 다른 번호가 나온다
+  const ok2 = await call('/api/auth/signup', { method: 'POST', body: { password: 'pass1234' } });
+  assert.notEqual(ok2.body.number, ok.body.number);
   // JSON 이 아닌 요청(다른 사이트의 폼 전송 등)은 받지 않는다
-  assert.equal((await call('/api/auth/signup', { method: 'POST', body: { username: 'formuser', password: 'pass1234' }, contentType: 'application/x-www-form-urlencoded' })).status, 400);
-});
+  assert.equal((await call('/api/auth/signup', { method: 'POST', body: { password: 'pass1234' }, contentType: 'application/x-www-form-urlencoded' })).status, 400);
+})
 
 test('관리자 기능은 관리자만', async () => {
   await signup('user1');

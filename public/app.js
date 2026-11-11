@@ -234,7 +234,7 @@ function renderLauncher() {
   setTitle();
   setActiveNav('');
   document.body.classList.add('launcher-mode');
-  const name = me?.name || me?.username || '';
+  const name = me?.name || '';
   const tile = (a) => {
     const iconEl = el('span', { class: 'app-icon', style: `background:${a.color}` });
     iconEl.innerHTML = a.icon;
@@ -1007,11 +1007,10 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
   setTitle();
   setActiveNav('');
   const signup = mode === 'signup';
-  const realName = el('input', { name: 'name', autocomplete: 'name', required: '', maxlength: '20', placeholder: '홍길동' });
-  // 가입할 때는 브라우저가 저장된 이메일을 아이디 칸에 추천하지 않게 자동 완성을 끈다.
+  // 로그인은 고유번호로 한다 (가입 때는 안 받고 서버가 만들어 준다).
   const username = el('input', {
-    name: 'username', required: '', maxlength: '20', autocapitalize: 'off', spellcheck: 'false',
-    autocomplete: signup ? 'off' : 'username', placeholder: signup ? '사용할 아이디' : '아이디'
+    name: 'username', inputmode: 'numeric', required: '', maxlength: '20', autocapitalize: 'off', spellcheck: 'false',
+    autocomplete: 'off', placeholder: '고유번호'
   });
   username.value = prefill;
   const password = el('input', {
@@ -1028,12 +1027,11 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
   });
 
   const form = el('form', { class: 'auth-form', novalidate: '' },
-    signup ? field('이름', realName, 'user', { hint: '본인 실명 (관리자가 누군지 알 수 있게)', check: RULES.name }) : null,
-    field('아이디', username, 'id', signup ? { hint: '한글·영문·숫자·_ 2~20자', check: RULES.username } : {}),
-    field('비밀번호', password, 'lock', signup ? { hint: '6자 이상', check: RULES.password } : {}),
+    signup ? null : field('고유번호', username, 'id', {}),
+    field('비밀번호', password, 'lock', signup ? { hint: '6자 이상 · 이름·아이디 없이 비밀번호만 정하면 돼요', check: RULES.password } : {}),
     message,
     submit,
-    el('p', { class: 'auth-foot', text: signup ? '이메일은 필요 없어요 · 관리자가 승인하면 바로 쓸 수 있어요' : '처음이라면 위에서 가입하기를 눌러 주세요' }),
+    el('p', { class: 'auth-foot', text: signup ? '이름·아이디·이메일 필요 없어요 · 가입하면 고유번호가 나와요 (꼭 기억!)' : '처음이라면 위에서 가입하기를 눌러 주세요' }),
     el('a', { class: 'auth-link', href: '#/contact', text: signup ? '가입이 안 되나요? 관리자에게 문의하기' : '비밀번호를 잊었나요? 관리자에게 문의하기' }));
 
   // 다시 입력하기 시작하면 이전 오류 문구는 지운다 (안내/승인 대기 문구는 남겨 둔다)
@@ -1045,20 +1043,17 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
     e.preventDefault();
     message.className = 'auth-message';
     message.textContent = '';
-    const body = { username: username.value.trim(), password: password.value };
-    if (signup) body.name = realName.value.trim();
+    const body = signup ? { password: password.value } : { username: username.value.trim(), password: password.value };
     // 형식이 틀린 칸이 있으면 서버에 보내기 전에 알려 준다
     if (signup) {
-      const wrong = [[realName, RULES.name, '이름을 확인해 주세요.'], [username, RULES.username, '아이디는 한글·영문·숫자·_ 2~20자예요.'], [password, RULES.password, '비밀번호는 6자 이상이에요.']]
-        .find(([input, rule]) => !rule(input === password ? input.value : input.value.trim()));
-      if (wrong) {
-        message.textContent = wrong[2];
-        wrong[0].closest('.field').classList.add('invalid');
-        wrong[0].focus();
+      if (!RULES.password(password.value)) {
+        message.textContent = '비밀번호는 6자 이상이에요.';
+        password.closest('.field').classList.add('invalid');
+        password.focus();
         return;
       }
     } else if (!body.username || !body.password) {
-      message.textContent = '아이디와 비밀번호를 입력해 주세요.';
+      message.textContent = '고유번호와 비밀번호를 입력해 주세요.';
       (body.username ? password : username).focus();
       return;
     }
@@ -1066,9 +1061,9 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
     submit.classList.add('loading');
     try {
       if (signup) {
-        await api('/api/auth/signup', { method: 'POST', body });
+        const res = await api('/api/auth/signup', { method: 'POST', body });
         if (token !== renderToken) return;
-        renderSignupDone(token, body.name, body.username);
+        renderSignupDone(token, res.number);
         return;
       }
       me = await api('/api/auth/login', { method: 'POST', body });
@@ -1103,20 +1098,20 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
   if (!shouldOpen) overlay.hidden = true;
 
   app.replaceChildren(studyLanding(openModal), overlay);
-  if (shouldOpen) (signup ? realName : (prefill ? password : username)).focus();
+  if (shouldOpen) (signup ? password : (prefill ? password : username)).focus();
   showReplyBanner(token);
 }
 
-// 가입 신청을 마친 뒤 보여 주는 화면
-function renderSignupDone(token, name, username) {
+// 가입 신청을 마친 뒤 보여 주는 화면: 고유번호를 꼭 기억하라고 크게 보여 준다
+function renderSignupDone(token, number) {
   const badge = icon('check', 'auth-done-badge');
   app.replaceChildren(authCard('가입 신청 완료!', '',
     el('div', { class: 'auth-done' },
       badge,
-      el('p', { class: 'auth-done-text', text: `${name}님, 신청이 들어갔어요.` }),
-      el('p', { class: 'auth-done-sub', text: '관리자가 승인하면 아이디와 비밀번호로 로그인할 수 있어요.' }),
-      el('div', { class: 'auth-done-id' }, el('span', { text: '아이디' }), el('strong', { text: username })),
-      el('button', { class: 'auth-submit', type: 'button', onclick: () => renderAuth(token, 'login', '', username) },
+      el('p', { class: 'auth-done-text', text: '신청이 들어갔어요.' }),
+      el('p', { class: 'auth-done-sub', text: '이 고유번호를 꼭 기억하세요. 로그인할 때 비밀번호와 같이 써요. (잊으면 관리자에게 문의)' }),
+      el('div', { class: 'auth-done-id' }, el('span', { text: '내 고유번호' }), el('strong', { text: number })),
+      el('button', { class: 'auth-submit', type: 'button', onclick: () => renderAuth(token, 'login', '', number, true) },
         el('span', { text: '로그인 화면으로' })))));
 }
 
@@ -1134,7 +1129,7 @@ function renderContact(token) {
   setActiveNav('');
   const loggedIn = me?.role === 'user';
   const name = el('input', { name: 'name', maxlength: '20', placeholder: '홍길동', autocomplete: 'name' });
-  const username = el('input', { name: 'username', maxlength: '20', placeholder: '가입한 아이디 (있으면)', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+  const username = el('input', { name: 'username', inputmode: 'numeric', maxlength: '20', placeholder: '가입한 고유번호 (있으면)', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
   const contactInfo = el('input', { name: 'contact', maxlength: '100', placeholder: '답장 받을 연락처 (선택)' });
   const message = el('textarea', { name: 'message', maxlength: '1000', rows: '5', placeholder: '예) 비밀번호를 잊어버렸어요 / 가입 승인 부탁드려요' });
   if (loggedIn) {
@@ -1149,7 +1144,7 @@ function renderContact(token) {
 
   const form = el('form', { class: 'auth-form', novalidate: '' },
     field('이름', name, 'user'),
-    field('아이디', username, 'id', { hint: loggedIn ? '로그인한 아이디로 보내요' : '선택' }),
+    field('고유번호', username, 'id', { hint: loggedIn ? '로그인한 번호로 보내요' : '선택' }),
     field('연락처', contactInfo, 'mail', { hint: '선택 · 관리자가 답장할 수 있게' }),
     el('label', { class: 'field' }, el('span', { class: 'field-label', text: '문의 내용' }), message, counter),
     error,
@@ -1443,8 +1438,8 @@ async function renderAdmin(token) {
     }[user.status] || [];
     row.append(
       el('div', { class: 'admin-user' },
-        el('strong', { text: user.name || '(이름 없음)' }),
-        el('span', { text: [`아이디 ${user.username}`, date, user.lastSeen ? `마지막 접속 ${timeAgo(user.lastSeen)}` : ''].filter(Boolean).join(' · ') }),
+        el('strong', { text: user.name || `번호 ${user.username}` }),
+        el('span', { text: [date, user.lastSeen ? `마지막 접속 ${timeAgo(user.lastSeen)}` : ''].filter(Boolean).join(' · ') }),
         user.status === 'blocked' && user.blockReason ? el('span', { text: `차단 이유: ${user.blockReason}` }) : null),
       el('div', { class: 'admin-actions' }, ...actions));
     // 초기화하면 임시 비밀번호를 이 화면에서 한 번만 보여 준다 (저장되지 않아서 다시 볼 수 없음)
@@ -1479,7 +1474,7 @@ async function renderAdmin(token) {
   function messageCard(msg) {
     const card = el('li', { class: `admin-message${msg.read ? ' read' : ''}` });
     const date = new Date(msg.at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' });
-    const who = [msg.username && `아이디 ${msg.username}`, msg.contact && `연락처 ${msg.contact}`, date].filter(Boolean).join(' · ');
+    const who = [msg.username && `번호 ${msg.username}`, msg.contact && `연락처 ${msg.contact}`, date].filter(Boolean).join(' · ');
     card.append(
       el('div', { class: 'admin-message-head' },
         el('div', { class: 'admin-user' },
@@ -1504,7 +1499,7 @@ async function renderAdmin(token) {
     const text = el('textarea', { rows: '2', maxlength: '1000', placeholder: '답장 쓰기 (문의한 사람의 로그인 화면에 떠요)' });
     const status = el('span', { class: 'admin-reply-note' });
     const send = async (resetPassword) => {
-      if (resetPassword && !confirm(`아이디 ${msg.username}의 비밀번호를 초기화해서 임시 비밀번호를 답장으로 보낼까요?\n\n다른 사람이 ${msg.username}인 척 문의했을 수도 있어요. 이름·연락처로 본인인지 먼저 확인해 주세요.`)) return;
+      if (resetPassword && !confirm(`번호 ${msg.username}의 비밀번호를 초기화해서 임시 비밀번호를 답장으로 보낼까요?\n\n다른 사람이 ${msg.username}인 척 문의했을 수도 있어요. 이름·연락처로 본인인지 먼저 확인해 주세요.`)) return;
       if (!resetPassword && !text.value.trim()) { status.textContent = '답장 내용을 적어 주세요.'; return; }
       area.querySelectorAll('button').forEach((b) => (b.disabled = true));
       try {
@@ -1666,7 +1661,7 @@ async function renderAdmin(token) {
       const picks = el('div', { class: 'app-access-users' }, ...(approved.length ? approved.map((u) => {
         const box = el('input', { type: 'checkbox', value: u.username.toLowerCase() });
         box.checked = rule.users.includes(u.username.toLowerCase());
-        return el('label', {}, box, el('span', { text: `${u.name || u.username} (${u.username})` }));
+        return el('label', {}, box, el('span', { text: u.name ? `${u.name} (${u.username})` : u.username }));
       }) : [el('span', { class: 'admin-empty', text: '승인된 사람이 없어요.' })]));
       const status = el('span', { class: 'app-access-status', role: 'status' });
       const showPicks = () => { picks.hidden = mode.value !== 'some'; };
@@ -2230,7 +2225,7 @@ async function openInviteDialog(id, title) {
     list.replaceChildren(...(friends.length ? friends.map((f) => el('label', { class: f.online ? '' : 'offline' },
       el('input', { type: 'checkbox', value: f.username }),
       f.online ? el('span', { class: 'online-dot' }) : null,
-      el('span', { text: `${f.name || f.username} (${f.username})${f.online ? '' : ' · 접속 안 함'}` })))
+      el('span', { text: `${f.name ? f.name + ' ' : ''}${f.username}${f.online ? '' : ' · 접속 안 함'}` })))
       : [el('p', { class: 'admin-empty' }, '아직 친구가 없어요. ',
         el('a', { href: '#/friends', text: '친구 추가하러 가기', onclick: () => dialog.close() }))]));
   } catch (err) {
@@ -2310,7 +2305,7 @@ function showFriendRequest(req) {
   };
   card.append(
     el('strong', { text: `${req.name}님이 친구 신청을 했어요` }),
-    el('span', { text: `아이디 ${req.username}` }),
+    el('span', { text: `번호 ${req.username}` }),
     el('div', {},
       el('button', { type: 'button', text: '거절', onclick: () => respond(false) }),
       el('button', { type: 'button', class: 'primary', text: '수락', onclick: () => respond(true) })));
@@ -2325,14 +2320,14 @@ async function renderFriends(token) {
   document.body.classList.add('app-mode');
   appTitle.textContent = '친구';
   const body = el('div', { class: 'friends-body' }, el('p', { class: 'message', text: '불러오는 중…' }));
-  const input = el('input', { type: 'text', maxlength: '20', placeholder: '친구 아이디', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '친구 아이디' });
+  const input = el('input', { type: 'text', inputmode: 'numeric', maxlength: '20', placeholder: '친구 고유번호', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': '친구 고유번호' });
   const msg = el('p', { class: 'auth-message', role: 'alert' });
   const form = el('form', { class: 'friend-add' }, input, el('button', { type: 'submit', class: 'primary', text: '친구 신청' }));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     msg.className = 'auth-message';
     msg.textContent = '';
-    if (!input.value.trim()) return void (msg.textContent = '친구 아이디를 적어 주세요.');
+    if (!input.value.trim()) return void (msg.textContent = '친구 고유번호를 적어 주세요.');
     try {
       const res = await api('/api/friends/request', { method: 'POST', body: { username: input.value.trim() } });
       msg.className = 'auth-message ok';
@@ -2345,7 +2340,7 @@ async function renderFriends(token) {
   });
   app.replaceChildren(el('div', { class: 'friends' },
     el('h1', { text: '친구' }),
-    el('p', { class: 'admin-empty', text: '친구가 되면 영상 화면의 \'같이 보기\'로 초대할 수 있어요. 친구 아이디는 친구에게 물어보세요.' }),
+    el('p', { class: 'admin-empty', text: '친구가 되면 영상 화면의 \'같이 보기\'로 초대할 수 있어요. 친구 고유번호는 친구에게 물어보세요.' }),
     el('section', { class: 'admin-section' }, el('h2', { text: '친구 추가' }), form, msg),
     body));
   input.focus();
@@ -2372,7 +2367,7 @@ async function renderFriends(token) {
     const row = (person, ...buttons) => el('li', { class: 'admin-row' },
       el('div', { class: 'admin-user' },
         el('strong', {}, person.online ? el('span', { class: 'online-dot' }) : null, person.name || person.username),
-        el('span', { text: `아이디 ${person.username}${person.online === undefined ? '' : person.online ? ' · 접속 중' : ''}` })),
+        el('span', { text: `번호 ${person.username}${person.online === undefined ? '' : person.online ? ' · 접속 중' : ''}` })),
       el('div', { class: 'admin-actions' }, ...buttons));
     const section = (title, items, empty) => el('section', { class: 'admin-section' },
       el('h2', { text: `${title} ${items.length}` }),
@@ -2383,7 +2378,7 @@ async function renderFriends(token) {
         el('button', { text: '거절', onclick: () => act('/api/friends/respond', { username: p.username, accept: false }) }))), '') : '',
       section('내 친구', data.friends.map((p) => row(p,
         el('button', { class: 'danger', text: '친구 끊기', onclick: () => act('/api/friends/remove', { username: p.username }, `${p.name}님과 친구를 끊을까요?`) }))),
-      '아직 친구가 없어요. 위에서 친구 아이디로 신청해 보세요.'),
+      '아직 친구가 없어요. 위에서 친구 고유번호로 신청해 보세요.'),
       data.outgoing.length ? section('보낸 친구 신청', data.outgoing.map((p) => row(p,
         el('button', { text: '취소', onclick: () => act('/api/friends/remove', { username: p.username }) }))), '') : '');
   }

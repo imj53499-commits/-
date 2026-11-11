@@ -271,19 +271,22 @@ export async function getSession(request, env, info = {}) {
 
 async function signup(request, env) {
   const body = await readJson(request);
-  const username = String(body?.username ?? '').trim();
   const password = String(body?.password ?? '');
-  const name = String(body?.name ?? '').trim().replace(/\s+/g, ' ');
-  if (!REAL_NAME.test(name)) return fail('이름을 1~20자로 적어 주세요. (글자와 띄어쓰기만)', 400);
-  if (!USERNAME.test(username)) return fail('아이디는 한글, 영문, 숫자, _ 로 2~20자로 정해 주세요.', 400);
   if (password.length < 6 || password.length > 100) return fail('비밀번호는 6자 이상으로 정해 주세요.', 400);
-  if (await env.DB.get(userKey(username))) return fail('이미 있는 아이디예요.', 409);
+  // 이름·아이디 없이 고유번호(6자리)로 계정을 만든다. 겹치면 다시 뽑는다.
+  let username = '';
+  for (let i = 0; i < 15; i++) {
+    const n = String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000));
+    if (!(await env.DB.get(userKey(n)))) { username = n; break; }
+  }
+  if (!username) return fail('잠시 뒤 다시 시도해 주세요.', 503);
 
   const salt = randomHex(16);
   const createdAt = Date.now();
-  const user = { username, name, salt, hash: await hashPassword(password, salt), status: 'pending', createdAt };
+  const user = { username, name: '', salt, hash: await hashPassword(password, salt), status: 'pending', createdAt };
   await putUser(env, user);
-  return json({ ok: true, status: 'pending' }, 201);
+  // 고유번호를 돌려줘서 사용자가 기억하게 한다
+  return json({ ok: true, status: 'pending', number: username }, 201);
 }
 
 // ---------- 로그인 무차별 대입 막기 ----------
