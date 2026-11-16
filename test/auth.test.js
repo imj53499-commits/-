@@ -35,10 +35,11 @@ beforeEach(() => {
   clearCache();
 });
 
-async function call(path, { method = 'GET', body, cookie, contentType = 'application/json' } = {}) {
+async function call(path, { method = 'GET', body, cookie, contentType = 'application/json', ip } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = contentType;
   if (cookie) headers.Cookie = cookie;
+  if (ip) headers['CF-Connecting-IP'] = ip;
   const res = await handleRequest(
     new Request(`https://site.test${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }),
     env,
@@ -547,4 +548,13 @@ test('색인 없는 기존 계정도 비밀번호만으로 로그인되고, 그�
   assert.equal(r2.body.username, 'oldie');
   // 틀린 비밀번호는 여전히 실패
   assert.equal((await call('/api/auth/login', { method: 'POST', body: { password: 'definitely-wrong' } })).status, 401);
+});
+
+test('가입은 한 IP 에서 너무 많이 하면 막힌다 (폭주·KV 소진 방지)', async () => {
+  const sign = (ip) => call('/api/auth/signup', { method: 'POST', body: { password: 'pw-' + Math.random().toString(36).slice(2) }, ip });
+  // 같은 IP 20번까지는 되고, 21번째는 429
+  for (let i = 0; i < 20; i++) assert.equal((await sign('5.5.5.5')).status, 201);
+  assert.equal((await sign('5.5.5.5')).status, 429);
+  // 다른 IP 는 멀쩡
+  assert.equal((await sign('6.6.6.6')).status, 201);
 });

@@ -281,7 +281,21 @@ export async function getSession(request, env, info = {}) {
 
 // ---------- 라우트 ----------
 
+// 가입 폭주 막기: 로그인 없이 쓰는 입구라, 한 IP 는 1시간에 20번까지, 사이트 전체는 하루 200번까지만.
+// (각 가입이 KV 를 몇 번 쓰므로, 자동 폭주로 무료 하루 한도를 날려 사이트가 멈추는 걸 막는다.)
+const SIGNUP_PER_IP_HOUR = 20;
+const SIGNUP_PER_DAY = 200;
+const kstDay = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10).replace(/-/g, '');
+
 async function signup(request, env) {
+  const ip = clientIp(request);
+  const ipKey = `rl:signup:${ip}`;
+  const dayKey = `rl:signupday:${kstDay()}`;
+  const ipN = Number(await env.DB.get(ipKey)) || 0;
+  if (ipN >= SIGNUP_PER_IP_HOUR) return fail('가입을 너무 많이 시도했어요. 1시간 뒤에 다시 해 주세요.', 429, 'RATE_LIMIT');
+  const dayN = Number(await env.DB.get(dayKey)) || 0;
+  if (dayN >= SIGNUP_PER_DAY) return fail('오늘은 가입이 많아 잠시 막혔어요. 내일 다시 하거나 관리자에게 문의해 주세요.', 429, 'RATE_LIMIT');
+
   const body = await readJson(request);
   const password = String(body?.password ?? '');
   if (password.length < 6 || password.length > 100) return fail('비밀번호는 6자 이상으로 정해 주세요.', 400);
@@ -299,6 +313,9 @@ async function signup(request, env) {
   const user = { username, name: '', status: 'pending', createdAt };
   await setPassword(env, user, password); // 해시 + 비밀번호 색인
   await putUser(env, user);
+  // 가입 횟수 세기 (IP 1시간, 전체 하루)
+  await env.DB.put(ipKey, String(ipN + 1), { expirationTtl: 3600 });
+  await env.DB.put(dayKey, String(dayN + 1), { expirationTtl: 60 * 60 * 36 });
   // 고유번호를 돌려줘서 사용자가 기억하게 한다 (복구용)
   return json({ ok: true, status: 'pending', number: username }, 201);
 }
