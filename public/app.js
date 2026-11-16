@@ -8,7 +8,8 @@ import {
   loadHistory, recordWatch, clearHistory, pickNext, loadPopupBounds, ENDED, PAUSED, PLAYING
 } from './player.js';
 import {
-  resumeTime, progressFraction, saveProgress, forgetProgress, continueWatching, clearProgress, formatTime
+  resumeTime, progressFraction, saveProgress, forgetProgress, continueWatching, clearProgress, formatTime,
+  loadSaved, isSaved, toggleSaved, removeSaved, clearSaved
 } from './player.js';
 import { PRESETS, loadDisguise, saveDisguise, applyDisguise, cleanDomain, iconFor, isDisguiseKey } from './disguise.js';
 
@@ -152,6 +153,17 @@ function videoCard(v) {
   }
 
   if (!v.isShort) {
+    const saveTag = el('span', { class: `card-save${isSaved(v.id) ? ' on' : ''}`, role: 'button', title: '나중에 볼 영상', 'aria-label': '나중에 볼 영상에 저장' });
+    saveTag.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 4h12a1 1 0 0 1 1 1v15l-7-4-7 4V5a1 1 0 0 1 1-1z"/></svg>';
+    saveTag.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const now = toggleSaved(v);
+      saveTag.classList.toggle('on', now);
+      showToast(now ? '나중에 볼 영상에 저장했어요.' : '저장을 뺐어요.');
+      if (location.hash.startsWith('#/saved')) route();
+    });
+    card.querySelector('.thumb').append(saveTag);
     const popup = el('span', { class: 'card-popup', role: 'button', title: '팝업으로 보기', 'aria-label': '팝업으로 보기' });
     popup.innerHTML = '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/></svg>';
     popup.addEventListener('click', (e) => {
@@ -250,6 +262,39 @@ function renderLauncher() {
 }
 
 const appTitle = document.getElementById('appTitle');
+
+// 영상 화면의 '저장' 버튼 (나중에 볼 영상)
+function saveButton(v) {
+  const btn = el('button', { class: 'popup-btn save-btn', type: 'button' });
+  const paint = () => {
+    const on = isSaved(v.id);
+    btn.classList.toggle('on', on);
+    btn.replaceChildren(el('span', { text: on ? '✓ 저장됨' : '저장' }));
+  };
+  btn.addEventListener('click', () => { const now = toggleSaved(v); paint(); showToast(now ? '나중에 볼 영상에 저장했어요.' : '저장을 뺐어요.'); });
+  paint();
+  return btn;
+}
+
+// 나중에 볼 영상 목록 (이 브라우저에 저장된 것)
+function renderSaved(token) {
+  setTitle();
+  setActiveNav('saved');
+  const list = loadSaved();
+  const head = el('div', { class: 'saved-head' },
+    el('h1', { class: 'section-title', text: `나중에 볼 영상 ${list.length ? list.length + '개' : ''}` }),
+    list.length ? el('button', { class: 'saved-clear', type: 'button', text: '모두 비우기', onclick: () => {
+      if (confirm('저장한 영상을 모두 비울까요?')) { clearSaved(); if (token === renderToken) renderSaved(token); }
+    } }) : null);
+  if (!list.length) {
+    app.replaceChildren(el('div', {},
+      head,
+      el('p', { class: 'message', text: '저장한 영상이 없어요. 영상 썸네일의 🔖 아이콘이나 영상 화면의 \'저장\'을 눌러 담아 두세요.' })));
+    return;
+  }
+  const grid = el('div', { class: 'grid' }, ...list.map(videoCard));
+  app.replaceChildren(el('div', {}, head, grid));
+}
 
 async function renderHome(category, token) {
   setTitle('');
@@ -511,7 +556,7 @@ async function renderWatch(id, token) {
     const autoplay = el('label', { class: 'autoplay-toggle', title: '영상이 끝나면 다음 영상을 자동으로 재생' },
       autoplayBox, el('span', { text: '자동재생' }));
     info.replaceChildren(el('h1', { class: 'watch-title', text: v.title }),
-      el('div', { class: 'watch-actions' }, owner, el('div', { class: 'watch-buttons' }, autoplay, togetherButton(id, v.title), popupBtn)), desc,
+      el('div', { class: 'watch-actions' }, owner, el('div', { class: 'watch-buttons' }, autoplay, saveButton(v), togetherButton(id, v.title), popupBtn)), desc,
       commentsSection(id, token));
 
     // 영상이 끝나면 관련 영상 중 안 본 영상으로 넘어간다 (자동재생이 켜져 있고 화면을 가리지 않았을 때)
@@ -834,6 +879,7 @@ function route() {
   // 관리자가 유튜브 앱을 안 보이게 했으면
   if (parts.length && hiddenApps.has('youtube')) return renderAppHidden();
 
+  if (parts[0] === 'saved') return renderSaved(token);
   if (parts[0] === 'shorts') return renderShorts(token);
   if (parts[0] === 'watch' && /^[\w-]{11}$/.test(parts[1] || '')) return renderWatch(parts[1], token);
   if (parts[0] === 'channel' && parts[1]) return renderChannel(parts[1], token);

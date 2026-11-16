@@ -217,3 +217,32 @@ export function formatTime(sec) {
   const ss = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
+
+// ---------- 나중에 볼 영상 (이 브라우저에만 저장) ----------
+const SAVED_KEY = 'savedVideos';
+const SAVED_MAX = 300;
+
+export function loadSaved() {
+  try { const l = JSON.parse(localStorage.getItem(SAVED_KEY) || '[]'); return Array.isArray(l) ? l : []; } catch { return []; }
+}
+export function isSaved(id) {
+  return loadSaved().some((v) => v.id === id);
+}
+// 저장돼 있으면 빼고, 없으면 넣는다. 지금 저장된 상태(true/false)를 돌려준다.
+export function toggleSaved(v) {
+  const list = loadSaved();
+  const i = list.findIndex((x) => x.id === v.id);
+  if (i >= 0) list.splice(i, 1);
+  else list.unshift({
+    id: v.id, title: v.title || '', channel: v.channel || '', channelId: v.channelId || '',
+    channelAvatar: v.channelAvatar || '', thumbnail: v.thumbnail || '', duration: v.duration || '', meta: v.meta || '', at: Date.now()
+  });
+  try { localStorage.setItem(SAVED_KEY, JSON.stringify(list.slice(0, SAVED_MAX))); } catch {}
+  return i < 0;
+}
+export function removeSaved(id) {
+  try { localStorage.setItem(SAVED_KEY, JSON.stringify(loadSaved().filter((v) => v.id !== id))); } catch {}
+}
+export function clearSaved() {
+  try { localStorage.removeItem(SAVED_KEY); } catch {}
+}
