@@ -2062,7 +2062,55 @@ const shownInvites = new Set();
 
 const togetherBar = el('div', { class: 'together-bar', hidden: '' });
 const inviteStack = el('div', { class: 'invite-stack', 'aria-live': 'polite' });
-document.body.append(togetherBar, inviteStack);
+// 같이 보기 채팅 패널 (방에 있을 때만)
+const chatMsgs = el('div', { class: 'tchat-msgs' });
+const chatInput = el('input', { class: 'tchat-input', type: 'text', maxlength: '500', placeholder: '메시지…', 'aria-label': '채팅 메시지' });
+const chatForm = el('form', { class: 'tchat-form' }, chatInput, el('button', { class: 'tchat-send', type: 'submit', 'aria-label': '보내기' }, '➤'));
+const chatPanel = el('div', { class: 'tchat', hidden: '' },
+  el('div', { class: 'tchat-head' }, el('span', { text: '채팅' }), el('button', { class: 'tchat-x', type: 'button', 'aria-label': '닫기', text: '×', onclick: () => toggleChat(false) })),
+  chatMsgs, chatForm);
+document.body.append(togetherBar, inviteStack, chatPanel);
+
+chatForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = chatInput.value.trim();
+  if (!text || !together) return;
+  chatInput.value = '';
+  try { await api('/api/watch/chat', { method: 'POST', body: { id: together.id, text } }); await syncTogether(); }
+  catch (err) { if (['NO_ROOM', 'NOT_MEMBER'].includes(err.code)) endTogether('같이 보기가 끝났어요.'); else showToast(err.message); chatInput.value = text; }
+});
+
+function toggleChat(open) {
+  if (!together) return;
+  together.chatOpen = open !== undefined ? open : !together.chatOpen;
+  chatPanel.hidden = !together.chatOpen;
+  if (together.chatOpen) {
+    together.unread = 0;
+    chatMsgs.scrollTop = chatMsgs.scrollHeight;
+    chatInput.focus();
+    setTogetherInterval(); // 채팅 열면 더 자주 받아 온다
+  } else setTogetherInterval();
+  drawTogetherBar();
+}
+
+function setTogetherInterval() {
+  if (!together) return;
+  clearInterval(togetherTimer);
+  const ms = together.chatOpen ? 1500 : (together.host ? 4000 : 1000);
+  togetherTimer = setInterval(syncTogether, ms);
+}
+
+function renderChatMessages() {
+  if (!together) return;
+  const atBottom = chatMsgs.scrollHeight - chatMsgs.scrollTop - chatMsgs.clientHeight < 40;
+  chatMsgs.replaceChildren(...(together.chat || []).map((m) => {
+    const mine = me && m.user === me.username.toLowerCase();
+    return el('div', { class: `tchat-msg${mine ? ' mine' : ''}` },
+      mine ? null : el('span', { class: 'tchat-name', text: m.name || m.user }),
+      el('span', { class: 'tchat-text', text: m.text }));
+  }).filter(Boolean));
+  if (atBottom || together.chatOpen) chatMsgs.scrollTop = chatMsgs.scrollHeight;
+}
 
 function saveTogether() {
   try {
@@ -2080,10 +2128,10 @@ function resumeTogether() {
 }
 
 function startTogether(id, host, room) {
-  together = { id, host, room };
+  together = { id, host, room, chat: [], lastSeq: 0, unread: 0, chatOpen: false };
   saveTogether();
-  clearInterval(togetherTimer);
-  togetherTimer = setInterval(syncTogether, host ? 4000 : 1000);
+  setTogetherInterval();
+  renderChatMessages();
   if (room) applyRoom(room);
   else syncTogether();
 }
@@ -2094,6 +2142,7 @@ function endTogether(message) {
   lastPosted = null;
   clearInterval(togetherTimer);
   togetherTimer = null;
+  chatPanel.hidden = true;
   saveTogether();
   drawTogetherBar();
   if (message) showToast(message);
@@ -2109,7 +2158,7 @@ async function syncTogether() {
   if (!together || document.hidden && together.host) return;
   try {
     const sent = Date.now();
-    const room = await api(`/api/watch/room?id=${together.id}`);
+    const room = await api(`/api/watch/room?id=${together.id}&since=${together.lastSeq || 0}`);
     // 서버 시각은 요청이 오가는 시간의 가운데쯤에 찍힌 것으로 본다
     room.offset = room.serverNow - (sent + Date.now()) / 2;
     applyRoom(room);
@@ -2125,6 +2174,17 @@ function roomExpectedPos(room) {
 function applyRoom(room) {
   if (!together) return;
   together.room = room;
+  // 새 채팅 메시지 반영
+  if (Array.isArray(room.chat) && room.chat.length) {
+    const fresh = room.chat.filter((m) => m.seq > (together.lastSeq || 0));
+    if (fresh.length) {
+      together.chat = [...(together.chat || []), ...fresh].slice(-200);
+      together.lastSeq = fresh[fresh.length - 1].seq;
+      if (!together.chatOpen) together.unread = (together.unread || 0) + fresh.filter((m) => !me || m.user !== me.username.toLowerCase()).length;
+      renderChatMessages();
+      drawTogetherBar();
+    }
+  }
   if (room.offset !== undefined) {
     serverOffset = room.offset;
     serverSynced = true;
@@ -2178,10 +2238,13 @@ function drawTogetherBar() {
   const names = room ? room.members.map((m) => m.name).join(', ') : '연결 중…';
   const goBack = !together.host && room && watching?.id !== room.video
     ? el('a', { href: `#/watch/${room.video}`, text: '영상으로' }) : null;
+  const chatBtn = el('button', { type: 'button', class: 'tchat-toggle', onclick: () => toggleChat() },
+    '채팅', together.unread ? el('span', { class: 'tchat-badge', text: String(Math.min(together.unread, 99)) }) : null);
   togetherBar.replaceChildren(...[
     el('span', { class: 'together-dot' }),
     el('span', { class: 'together-text', text: `같이 보는 중${together.host ? ' (방장)' : ''} · ${names}` }),
     goBack,
+    chatBtn,
     el('button', { type: 'button', text: together.host ? '끝내기' : '나가기', onclick: leaveTogether })].filter(Boolean));
 }
 

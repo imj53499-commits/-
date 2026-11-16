@@ -15,6 +15,8 @@ const ROOM_TTL = 6 * 60 * 60 * 1000; // 6시간 동안 아무 변화 없는 방�
 const SEEN_EVERY = 10 * 1000; // 방 확인 기록은 10초에 한 번만 쓴다 (쓰기 줄이기)
 const AWAY_AFTER = 45 * 1000; // 45초 넘게 안 보이면 나간 걸로 본다
 const MAX_INVITES = 10;
+const MAX_CHAT = 500; // 한 글자 수
+const CHAT_FETCH = 40; // 한 번에 가져오는 메시지 수
 
 const readyDbs = new WeakSet();
 
@@ -31,8 +33,12 @@ async function ensureTables(db) {
     db.prepare(`CREATE TABLE IF NOT EXISTS watch_invites (
       id TEXT PRIMARY KEY, room TEXT NOT NULL, from_user TEXT NOT NULL, from_name TEXT NOT NULL,
       to_user TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, status TEXT NOT NULL)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS watch_chat (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, room TEXT NOT NULL, user TEXT NOT NULL,
+      name TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL)`),
     db.prepare('CREATE INDEX IF NOT EXISTS watch_invites_to ON watch_invites (to_user, status, created)'),
-    db.prepare('CREATE INDEX IF NOT EXISTS watch_rooms_host ON watch_rooms (host)')
+    db.prepare('CREATE INDEX IF NOT EXISTS watch_rooms_host ON watch_rooms (host)'),
+    db.prepare('CREATE INDEX IF NOT EXISTS watch_chat_room ON watch_chat (room, seq)')
   ]);
   readyDbs.add(db);
 }
@@ -173,7 +179,30 @@ async function getRoom(url, env, session) {
   if (!member) return fail('이 방에 없어요.', 403, 'NOT_MEMBER');
   const now = Date.now();
   await touchMember(db, id, user, now);
-  return json(await roomView(db, room, now));
+  const view = await roomView(db, room, now);
+  // 채팅: 클라이언트가 가진 마지막 seq 다음 것만 보낸다 (polling 에 얹어서 추가 요청 없이)
+  const since = Math.max(0, Math.min(Number(url.searchParams.get('since')) || 0, 2e15));
+  const { results: chat } = await db.prepare('SELECT seq, user, name, text, at FROM watch_chat WHERE room = ? AND seq > ? ORDER BY seq LIMIT ?')
+    .bind(id, since, CHAT_FETCH).all();
+  view.chat = chat;
+  return json(view);
+}
+
+// 채팅 보내기: 방에 있는 사람만
+async function sendChat(request, env, session) {
+  const body = await readJson(request);
+  const id = String(body?.id ?? '');
+  const text = String(body?.text ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, MAX_CHAT);
+  if (!ROOM_ID.test(id) || !text) return fail('잘못된 요청', 400);
+  const db = env.D1;
+  const user = me(session);
+  const member = await db.prepare('SELECT seen FROM watch_members WHERE room = ? AND user = ?').bind(id, user.id).first();
+  if (!member) return fail('이 방에 없어요.', 403, 'NOT_MEMBER');
+  const now = Date.now();
+  const res = await db.prepare('INSERT INTO watch_chat (room, user, name, text, at) VALUES (?, ?, ?, ?, ?)')
+    .bind(id, user.id, user.name, text, now).run();
+  await touchMember(db, id, user, now);
+  return json({ ok: true, seq: res.meta.last_row_id, at: now });
 }
 
 // 방장이 재생·멈춤·건너뛰기·영상 바꾸기를 하면 알린다
@@ -208,7 +237,8 @@ async function removeRoom(db, id) {
   await db.batch([
     db.prepare('DELETE FROM watch_rooms WHERE id = ?').bind(id),
     db.prepare('DELETE FROM watch_members WHERE room = ?').bind(id),
-    db.prepare('DELETE FROM watch_invites WHERE room = ?').bind(id)
+    db.prepare('DELETE FROM watch_invites WHERE room = ?').bind(id),
+    db.prepare('DELETE FROM watch_chat WHERE room = ?').bind(id)
   ]);
 }
 
@@ -231,6 +261,7 @@ export async function handleWatch(request, env, session) {
   if (route === 'POST /api/watch/answer') return answer(request, env, session);
   if (route === 'GET /api/watch/room') return getRoom(url, env, session);
   if (route === 'POST /api/watch/state') return setState(request, env, session);
+  if (route === 'POST /api/watch/chat') return sendChat(request, env, session);
   if (route === 'POST /api/watch/leave') return leave(request, env, session);
   return fail('Not found', 404);
 }

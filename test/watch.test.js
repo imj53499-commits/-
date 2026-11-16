@@ -10,7 +10,7 @@ function fakeD1() {
     bind: (...a) => statement(sql, a),
     first: async () => db.prepare(sql).get(...args) ?? null,
     all: async () => ({ results: db.prepare(sql).all(...args) }),
-    run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...args).changes) } })
+    run: async () => { const r = db.prepare(sql).run(...args); return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; }
   });
   return { prepare: (sql) => statement(sql), batch: async (list) => { for (const s of list) await s.run(); } };
 }
@@ -144,4 +144,35 @@ test('D1 이 없으면 설정 필요, 관리자는 못 씀, 잘못된 입력은 
   assert.equal((await call(a, '/api/watch/invite', { to: ['jisu'], video: 'bad' })).status, 400);
   delete env.D1;
   assert.equal((await call(a, '/api/watch/inbox')).body.code, 'NO_WATCH_DB');
+});
+
+test('같이 보기 채팅: 방에 있는 사람끼리 메시지가 오간다', async () => {
+  const a = await userCookie('minsu', '김민수');
+  const b = await userCookie('jisu', '이지수');
+  const c = await userCookie('cheolsu', '박철수');
+  await makeFriends(a, b, 'jisu');
+  const room = await call(a, '/api/watch/invite', { to: ['jisu'], video: 'aaaaaaaaaaa', title: '영상', pos: 0, playing: true });
+  const id = room.body.id;
+  const inv = (await call(b, '/api/watch/inbox')).body.invites[0];
+  await call(b, '/api/watch/answer', { id: inv.id, accept: true });
+
+  // 방장이 채팅 → 상대가 polling(room?since=0)으로 받는다
+  assert.equal((await call(a, '/api/watch/chat', { id, text: '안녕!' })).status, 200);
+  const seenB = await call(b, `/api/watch/room?id=${id}&since=0`);
+  assert.deepEqual(seenB.body.chat.map((m) => [m.user, m.text]), [['minsu', '안녕!']]);
+  const lastSeq = seenB.body.chat[0].seq;
+
+  // 상대가 채팅 → 방장이 그 다음(since=lastSeq)만 받는다
+  await call(b, '/api/watch/chat', { id, text: '반가워' });
+  const seenA = await call(a, `/api/watch/room?id=${id}&since=${lastSeq}`);
+  assert.deepEqual(seenA.body.chat.map((m) => [m.user, m.text]), [['jisu', '반가워']]);
+
+  // 방에 없는 사람은 채팅 못 보낸다
+  assert.equal((await call(c, '/api/watch/chat', { id, text: '끼어들기' })).body.code, 'NOT_MEMBER');
+  // 빈 메시지는 거절
+  assert.equal((await call(a, '/api/watch/chat', { id, text: '   ' })).status, 400);
+
+  // 방장이 나가면 방·채팅이 사라진다
+  await call(a, '/api/watch/leave', { id });
+  assert.equal((await call(b, `/api/watch/room?id=${id}`)).body.code, 'NO_ROOM');
 });
