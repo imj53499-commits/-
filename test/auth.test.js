@@ -558,3 +558,15 @@ test('가입은 한 IP 에서 너무 많이 하면 막힌다 (폭주·KV 소진 
   // 다른 IP 는 멀쩡
   assert.equal((await sign('6.6.6.6')).status, 201);
 });
+
+test('흔하거나 단순한 비밀번호는 가입에서 막힌다', async () => {
+  const sign = (pw) => call('/api/auth/signup', { method: 'POST', body: { password: pw }, ip: '7.7.7.' + Math.floor(Math.random() * 250) });
+  assert.equal((await sign('1234')).status, 400);        // 너무 짧음
+  assert.equal((await sign('password')).status, 400);    // 흔함
+  assert.equal((await sign('12345678')).status, 400);    // 순차
+  assert.equal((await sign('aaaaaaaa')).status, 400);    // 반복
+  assert.equal((await sign('qwerty123')).status, 400);   // 흔함
+  assert.equal((await sign('youtube')).status, 400);     // 흔함(+짧음)
+  const ok = await sign('purple-tiger-42');              // 괜찮음
+  assert.equal(ok.status, 201);
+});

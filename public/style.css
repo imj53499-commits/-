@@ -822,3 +822,17 @@ body.auth-mode .topbar { display: none !important; }
 .stat-bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 6px; }
 .stat-bar-fill { width: 100%; min-height: 3px; border-radius: 6px 6px 0 0; background: linear-gradient(180deg, #34d399, #10b981); }
 .stat-bar-day { font-size: 11px; color: var(--text-sub); }
+
+/* 비밀번호 강도 막대 (가입) */
+.pw-meter { display: flex; align-items: center; gap: 8px; margin: -6px 2px 2px; }
+.pw-bar { display: flex; gap: 4px; flex: 1; }
+.pw-bar span { height: 5px; flex: 1; border-radius: 3px; background: var(--border); transition: background .15s; }
+.pw-bar-label { font-size: 12px; color: var(--text-sub); min-width: 30px; text-align: right; }
+.pw-meter[data-score="0"] .pw-bar span:nth-child(1) { background: #e5484d; }
+.pw-meter[data-score="0"] .pw-bar-label { color: #e5484d; }
+.pw-meter[data-score="1"] .pw-bar span:nth-child(-n+1) { background: #f59e0b; }
+.pw-meter[data-score="1"] .pw-bar-label { color: #f59e0b; }
+.pw-meter[data-score="2"] .pw-bar span:nth-child(-n+2) { background: #22c55e; }
+.pw-meter[data-score="2"] .pw-bar-label { color: #16a34a; }
+.pw-meter[data-score="3"] .pw-bar span { background: #16a34a; }
+.pw-meter[data-score="3"] .pw-bar-label { color: #16a34a; }

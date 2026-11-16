@@ -958,8 +958,22 @@ function field(label, input, iconName, { hint = '', check } = {}) {
 const RULES = {
   name: (v) => /^[\p{L}\p{M}][\p{L}\p{M} .'-]{0,19}$/u.test(v),
   username: (v) => /^[a-zA-Z0-9_가-힣]{2,20}$/.test(v),
-  password: (v) => v.length >= 6 && v.length <= 100
+  password: (v) => v.length >= 8 && v.length <= 100
 };
+
+// 화면에서 비밀번호 강도를 대충 보여 준다 (서버가 최종 판단). 0 약함 ~ 3 강함.
+const COMMON_PW = new Set(['password', 'password1', 'qwerty', 'qwerty123', '12345678', '123456789', '1234567890', '111111', 'iloveyou', 'abcd1234', 'youtube', 'google', 'school', 'admin123', 'welcome', 'asdf1234', 'q1w2e3r4', '00000000']);
+function passwordStrength(v) {
+  if (!v) return { score: -1, label: '' };
+  if (v.length < 8 || COMMON_PW.has(v.toLowerCase())) return { score: 0, label: '약함' };
+  let kinds = 0;
+  if (/[a-z]/.test(v)) kinds++;
+  if (/[A-Z]/.test(v)) kinds++;
+  if (/\d/.test(v)) kinds++;
+  if (/[^a-zA-Z0-9]/.test(v)) kinds++;
+  const score = Math.min(3, (v.length >= 12 ? 1 : 0) + (kinds >= 2 ? 1 : 0) + (kinds >= 3 || v.length >= 10 ? 1 : 0));
+  return { score, label: ['약함', '보통', '좋음', '강함'][score] };
+}
 
 // 공부 사이트 입구(로그아웃 상태): 위에 로그인/회원가입 버튼, 아래 공부 소개.
 // 버튼을 누르면 창(모달)이 뜨고, 로그인에 성공하면 그대로 앱(goodle.kro.kr)으로 들어간다.
@@ -1009,7 +1023,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
   const signup = mode === 'signup';
   const password = el('input', {
     name: 'password', type: 'password', required: '', minlength: '6', maxlength: '100',
-    autocomplete: signup ? 'new-password' : 'current-password', placeholder: signup ? '6자 이상' : '비밀번호'
+    autocomplete: signup ? 'new-password' : 'current-password', placeholder: signup ? '8자 이상' : '비밀번호'
   });
   const message = notice
     ? el('p', { class: 'auth-message ok', text: notice, role: 'alert' })
@@ -1020,8 +1034,20 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
     onclick: () => { if (mode !== key) renderAuth(token, key, '', '', true); }
   });
 
+  // 가입 화면: 비밀번호 강도 막대
+  const pwBar = el('div', { class: 'pw-bar', 'aria-hidden': 'true' }, el('span'), el('span'), el('span'));
+  const pwBarText = el('span', { class: 'pw-bar-label' });
+  const pwMeter = el('div', { class: 'pw-meter' }, pwBar, pwBarText);
+  if (signup) {
+    password.addEventListener('input', () => {
+      const { score, label } = passwordStrength(password.value);
+      pwMeter.dataset.score = String(score);
+      pwBarText.textContent = password.value ? label : '';
+    });
+  }
   const form = el('form', { class: 'auth-form', novalidate: '' },
-    field('비밀번호', password, 'lock', signup ? { hint: '6자 이상 · 이름·아이디 없이 비밀번호만 정하면 돼요', check: RULES.password } : { hint: '비밀번호만 넣으면 로그인돼요' }),
+    field('비밀번호', password, 'lock', signup ? { hint: '8자 이상 · 흔한 비밀번호(1234·password 등)는 안 돼요', check: RULES.password } : { hint: '비밀번호만 넣으면 로그인돼요' }),
+    signup ? pwMeter : null,
     message,
     submit,
     el('p', { class: 'auth-foot', text: signup ? '이름·아이디·이메일 필요 없어요 · 가입하면 고유번호가 나와요 (꼭 기억!)' : '비밀번호만 넣으면 돼요 · 처음이면 위에서 가입하기' }),
@@ -1040,7 +1066,7 @@ function renderAuth(token, mode = 'login', notice = '', prefill = '', open = fal
     // 형식이 틀린 칸이 있으면 서버에 보내기 전에 알려 준다
     if (signup) {
       if (!RULES.password(password.value)) {
-        message.textContent = '비밀번호는 6자 이상이에요.';
+        message.textContent = '비밀번호는 8자 이상이에요.';
         password.closest('.field').classList.add('invalid');
         password.focus();
         return;
@@ -1270,13 +1296,13 @@ function renderPassword(token, forced) {
   setTitle();
   setActiveNav('');
   const current = el('input', { type: 'password', autocomplete: 'current-password', placeholder: forced ? '관리자에게 받은 임시 비밀번호' : '지금 비밀번호' });
-  const next = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '6자 이상' });
+  const next = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '8자 이상' });
   const again = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '한 번 더' });
   const error = el('p', { class: 'auth-message', role: 'alert' });
   const submit = el('button', { class: 'auth-submit', type: 'submit' }, el('span', { text: '비밀번호 바꾸기' }));
   const form = el('form', { class: 'auth-form', novalidate: '' },
     field(forced ? '임시 비밀번호' : '지금 비밀번호', current, 'lock'),
-    field('새 비밀번호', next, 'lock', { hint: '6자 이상', check: RULES.password }),
+    field('새 비밀번호', next, 'lock', { hint: '8자 이상 · 흔한 비밀번호는 안 돼요', check: RULES.password }),
     field('새 비밀번호 확인', again, 'lock', { check: (v) => v.length > 0 && v === next.value }),
     error,
     submit,
@@ -1286,7 +1312,7 @@ function renderPassword(token, forced) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!current.value) { error.textContent = '지금 비밀번호를 적어 주세요.'; current.focus(); return; }
-    if (!RULES.password(next.value)) { error.textContent = '새 비밀번호는 6자 이상이에요.'; next.focus(); return; }
+    if (!RULES.password(next.value)) { error.textContent = '새 비밀번호는 8자 이상이에요.'; next.focus(); return; }
     if (next.value !== again.value) { error.textContent = '새 비밀번호가 서로 달라요.'; again.focus(); return; }
     submit.disabled = true;
     submit.classList.add('loading');

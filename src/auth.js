@@ -22,6 +22,35 @@ const USERNAME = /^[a-zA-Z0-9_가-힣]{2,20}$/;
 const REAL_NAME = /^[\p{L}\p{M}][\p{L}\p{M} .'-]{0,19}$/u;
 const STATUSES = ['pending', 'approved', 'rejected', 'blocked'];
 
+// 너무 흔하거나 단순한 비밀번호는 막는다 (비밀번호가 곧 계정이라, 남이 쉽게 맞히면 그 계정이 털린다).
+const MIN_PASSWORD = 8;
+const COMMON_PASSWORDS = new Set([
+  'password', 'password1', 'passw0rd', 'qwerty', 'qwerty123', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm',
+  '12345678', '123456789', '1234567890', '111111', '000000', '1q2w3e4r', '1q2w3e4r5t', 'abcd1234',
+  'abcdefg', 'iloveyou', 'admin123', 'letmein', 'welcome', 'welcome1', 'monkey', 'dragon', 'sunshine',
+  'princess', 'football', 'baseball', 'superman', 'batman', 'master', 'michael', 'shadow', 'computer',
+  'google', 'youtube', 'school', 'student', 'korea', 'samsung', 'naver', 'kakao', 'gksrmf', 'tjgkrry',
+  'asdasd', 'asdf1234', 'zxcv1234', 'qazwsx', 'q1w2e3r4', '0000', '00000000', '12341234', '1234abcd'
+]);
+// 반복(aaaaaaaa)·연속(12345678, abcdefg)만으로 된 비밀번호인지
+function isSequential(p) {
+  const up = /^(0123456789|1234567890|abcdefghijklmnopqrstuvwxyz|qwertyuiop|asdfghjkl|zxcvbnm)/;
+  const inc = p.split('').every((c, i) => i === 0 || c.charCodeAt(0) === p.charCodeAt(i - 1) + 1);
+  const dec = p.split('').every((c, i) => i === 0 || c.charCodeAt(0) === p.charCodeAt(i - 1) - 1);
+  return inc || dec || up.test(p.slice(0, 8));
+}
+// 막아야 할 비밀번호면 안내 문구, 괜찮으면 '' 를 돌려준다
+function weakPasswordReason(password) {
+  if (password.length < MIN_PASSWORD) return `비밀번호는 ${MIN_PASSWORD}자 이상으로 정해 주세요.`;
+  if (password.length > 100) return '비밀번호가 너무 길어요.';
+  const low = password.toLowerCase();
+  if (COMMON_PASSWORDS.has(low)) return '너무 흔한 비밀번호예요. 다른 걸로 정해 주세요.';
+  if (/^(.)\1+$/.test(password)) return '같은 글자만 반복한 비밀번호는 쓸 수 없어요.';
+  if (/^\d+$/.test(password) && isSequential(password)) return '너무 단순한 비밀번호예요 (123456…). 다른 걸로 정해 주세요.';
+  if (isSequential(low)) return '너무 단순한 비밀번호예요. 다른 걸로 정해 주세요.';
+  return '';
+}
+
 // ---------- 공통 ----------
 
 export function json(data, status = 200, headers = {}) {
@@ -298,7 +327,8 @@ async function signup(request, env) {
 
   const body = await readJson(request);
   const password = String(body?.password ?? '');
-  if (password.length < 6 || password.length > 100) return fail('비밀번호는 6자 이상으로 정해 주세요.', 400);
+  const weak = weakPasswordReason(password);
+  if (weak) return fail(weak, 400, 'WEAK_PASSWORD');
   // 비밀번호만으로 로그인하므로, 이미 쓰는 비밀번호는 못 쓴다
   if (await env.DB.get(await pwKey(password))) return fail('그 비밀번호는 이미 쓰고 있어요. 다른 비밀번호로 정해 주세요.', 409, 'PW_TAKEN');
   // 이름·아이디 없이 고유번호(6자리)로 계정을 만든다 (복구용). 겹치면 다시 뽑는다.
@@ -433,7 +463,8 @@ async function changePassword(request, env) {
   const next = String(body?.next ?? '');
   const user = await env.DB.get(userKey(session.username), 'json');
   if (!user || !safeEqual(await hashPassword(current, user.salt), user.hash)) return fail('지금 비밀번호가 맞지 않아요.', 400, 'BAD_PASSWORD');
-  if (next.length < 6 || next.length > 100) return fail('새 비밀번호는 6자 이상으로 정해 주세요.', 400);
+  const weakNext = weakPasswordReason(next);
+  if (weakNext) return fail(weakNext, 400, 'WEAK_PASSWORD');
   if (next === current) return fail('지금과 다른 비밀번호로 정해 주세요.', 400);
   const takenBy = await env.DB.get(await pwKey(next));
   if (takenBy && takenBy !== user.username) return fail('그 비밀번호는 다른 사람이 쓰고 있어요. 다른 걸로 정해 주세요.', 409, 'PW_TAKEN');
